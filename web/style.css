@@ -4,7 +4,8 @@ header{display:flex;align-items:center;gap:20px;padding:14px 22px;border-bottom:
 nav button{background:none;border:1px solid var(--line);color:var(--ink);padding:6px 12px;border-radius:8px;cursor:pointer}
 nav button.active{border-color:var(--accent);color:var(--accent)}
 main{padding:22px;max-width:1100px;margin:0 auto}
-input,textarea{display:block;width:100%;margin:6px 0;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px}
+input,textarea,select{display:block;width:100%;margin:6px 0;background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px}
+.salary-row{display:flex;gap:8px}.salary-row input{flex:1}.salary-row select{width:auto;flex:0 0 auto}
 button{cursor:pointer}fieldset{border:1px solid var(--line);border-radius:10px;margin:14px 0}
 #board-cols{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
 .col{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px}

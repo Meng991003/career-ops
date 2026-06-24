@@ -54,8 +54,10 @@ $('#save-profile').onclick = async () => {
   await api('/api/setup/profile', { method:'POST', headers:{'content-type':'application/json'},
     body: JSON.stringify({
       full_name: $('#full_name').value, email: $('#email').value, location: $('#location').value,
+      preferred_location: $('#preferred_location').value,
       phone: $('#phone').value, linkedin: $('#linkedin').value, github: $('#github').value,
       timezone: $('#timezone').value, salary_target: $('#salary_target').value,
+      salary_period: $('#salary_period').value,
       target_roles: $('#target_roles').value.split(',').map(s=>s.trim()).filter(Boolean) }) });
   loadStatus();
 };

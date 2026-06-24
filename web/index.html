@@ -29,10 +29,17 @@
         <input id="phone" placeholder="Phone">
         <input id="linkedin" placeholder="LinkedIn URL">
         <input id="github" placeholder="GitHub URL">
-        <input id="location" placeholder="Location (e.g. Kuala Lumpur, MY)">
+        <input id="location" placeholder="Your location (e.g. Kuala Lumpur, MY)">
+        <input id="preferred_location" placeholder="Preferred work location(s), e.g. Kuala Lumpur / Remote">
         <input id="timezone" placeholder="Timezone (e.g. Asia/Kuala_Lumpur)">
         <input id="target_roles" placeholder="Target roles, comma-separated">
-        <input id="salary_target" placeholder="Salary target (e.g. RM120k-160k)">
+        <div class="salary-row">
+          <input id="salary_target" placeholder="Salary target (e.g. RM8k-12k)">
+          <select id="salary_period">
+            <option value="monthly" selected>per month</option>
+            <option value="annual">per year</option>
+          </select>
+        </div>
         <button id="save-profile">Save Profile</button>
       </fieldset>
       <fieldset><legend>Portals</legend>

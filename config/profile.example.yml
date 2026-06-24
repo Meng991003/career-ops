@@ -54,6 +54,7 @@ narrative:
 
 compensation:
   target_range: "$150K-200K"     # Your target total comp
+  period: "annual"               # "monthly" or "annual" — how target_range/minimum are quoted
   currency: "USD"
   minimum: "$120K"               # Walk-away number
   location_flexibility: "Remote preferred, 1 week/month on-site possible"
@@ -63,6 +64,9 @@ location:
   city: "San Francisco"
   timezone: "PST"
   visa_status: "No sponsorship needed"
+  # Preferred work location(s), free text. Onboarding mirrors this into
+  # portals.yml location_filter.allow so scans focus on these places.
+  preferred: "San Francisco / Remote"
   # For remote roles outside your country:
   # onsite_availability: "1 week/month in any city"
 
