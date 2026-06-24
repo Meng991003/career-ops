@@ -2,6 +2,7 @@
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
+import { existsSync, unlinkSync, readFileSync } from 'fs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');
@@ -38,6 +39,19 @@ try {
 
   const bad = await fetch(`${base}/api/nope`);
   ok(bad.status === 404, 'unknown route → 404');
+
+  // Resume upload: post the docx fixture as raw bytes, expect extracted fields back.
+  const hadCv = existsSync(join(ROOT, 'cv.md'));
+  const docxBytes = readFileSync(join(ROOT, 'server/fixtures/sample.docx'));
+  const up = await fetch(`${base}/api/setup/cv/upload?filename=resume.docx`, { method: 'POST', body: docxBytes });
+  const upBody = await up.json();
+  ok(up.status === 200, 'POST /api/setup/cv/upload returns 200');
+  ok(upBody.fields && upBody.fields.email === 'jane@example.com', 'upload returns extracted email');
+  ok(typeof upBody.cvText === 'string' && upBody.cvText.includes('Jane Tester'), 'upload returns cvText');
+  if (!hadCv && existsSync(join(ROOT, 'cv.md'))) unlinkSync(join(ROOT, 'cv.md')); // don't pollute onboarding state
+
+  const badUpload = await fetch(`${base}/api/setup/cv/upload?filename=notes.txt`, { method: 'POST', body: 'x' });
+  ok(badUpload.status === 400, 'unsupported upload → 400');
 } finally {
   srv.kill();
 }

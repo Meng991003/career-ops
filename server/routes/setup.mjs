@@ -3,7 +3,9 @@ import { join } from 'path';
 import yaml from 'js-yaml';
 import { runScriptJson } from '../lib/run.mjs';
 import { resolveUserPath, REPO_ROOT } from '../lib/paths.mjs';
-import { readJsonBody, sendJson, atomicWrite } from '../lib/http.mjs';
+import { readJsonBody, readRawBody, sendJson, atomicWrite } from '../lib/http.mjs';
+import { extractText } from '../lib/resume-extract.mjs';
+import { extractFields } from '../lib/resume-fields.mjs';
 
 export async function getStatus(req, res) {
   const status = await runScriptJson('doctor.mjs', ['--json']);
@@ -27,6 +29,9 @@ export async function postProfile(req, res) {
   profile.candidate.full_name = b.full_name ?? profile.candidate.full_name;
   profile.candidate.email = b.email ?? profile.candidate.email;
   profile.candidate.location = b.location ?? profile.candidate.location;
+  if (b.phone) profile.candidate.phone = b.phone;
+  if (b.linkedin) profile.candidate.linkedin = b.linkedin;
+  if (b.github) profile.candidate.github = b.github;
   if (Array.isArray(b.target_roles)) profile.target_roles.primary = b.target_roles;
   if (b.timezone) profile.location.timezone = b.timezone;
   if (b.salary_target) profile.compensation.target_range = b.salary_target;
@@ -47,4 +52,20 @@ export async function postPortals(req, res) {
   }
   await atomicWrite(resolveUserPath('portals.yml'), yaml.dump(portals, { lineWidth: 100 }));
   sendJson(res, 200, { ok: true });
+}
+
+export async function postCvUpload(req, res) {
+  const url = new URL(req.url, 'http://localhost');
+  const filename = url.searchParams.get('filename') || '';
+  const buffer = await readRawBody(req);
+  let text;
+  try {
+    text = await extractText(buffer, filename);
+  } catch (e) {
+    if (e.code === 'UNSUPPORTED_FORMAT') return sendJson(res, 400, { error: 'Unsupported file — upload a PDF or .docx' });
+    if (e.code === 'EMPTY_EXTRACTION') return sendJson(res, 400, { error: "Couldn't read text — the file may be image-only; paste your CV instead." });
+    throw e; // dispatcher → 500
+  }
+  await atomicWrite(resolveUserPath('cv.md'), text);
+  sendJson(res, 200, { ok: true, cvText: text, fields: extractFields(text) });
 }

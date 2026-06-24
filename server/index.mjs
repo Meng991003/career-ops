@@ -13,6 +13,7 @@ const WEB_DIR = join(REPO_ROOT, 'web');
 const ROUTES = [
   ['GET',   /^\/api\/setup\/status$/,        setup.getStatus],
   ['POST',  /^\/api\/setup\/cv$/,            setup.postCv],
+  ['POST',  /^\/api\/setup\/cv\/upload$/,    setup.postCvUpload],
   ['POST',  /^\/api\/setup\/profile$/,       setup.postProfile],
   ['POST',  /^\/api\/setup\/portals$/,       setup.postPortals],
   ['GET',   /^\/api\/applications$/,          applications.list],
