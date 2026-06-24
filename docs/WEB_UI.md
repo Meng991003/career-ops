@@ -12,6 +12,7 @@ It reuses the existing career-ops scripts and data files — no database.
 
 - **Setup** — paste your CV, fill your profile, set portal keywords. Writes
   `cv.md`, `config/profile.yml`, `portals.yml` (user-layer files only).
+- **Resume upload** — on Setup, upload a PDF or `.docx`; the server extracts the text into `cv.md` and pre-fills email/phone/LinkedIn/GitHub/name for review. Deterministic and offline (no API key). Image-only/scanned PDFs can't be read — paste your CV instead. Legacy `.doc` is not supported (re-save as `.docx` or PDF).
 - **Applications** — a board of `data/applications.md` grouped by canonical
   status; click a card to read its report.
 - **Progress** — a funnel of counts across the 8 canonical states.

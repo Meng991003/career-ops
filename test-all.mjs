@@ -161,6 +161,9 @@ const scripts = [
   { name: 'server/markdown-table-tests.mjs', expectExit: 0 },
   { name: 'server/paths-tests.mjs', expectExit: 0 },
   { name: 'server/routes-tests.mjs', expectExit: 0 },
+  { name: 'server/resume-fields-tests.mjs', expectExit: 0 },
+  { name: 'server/http-tests.mjs', expectExit: 0 },
+  { name: 'server/resume-extract-tests.mjs', expectExit: 0 },
   { name: 'validate-portals.mjs --file templates/portals.example.yml', expectExit: 0 },
   // Missing-file run: must exit 0 gracefully and hit no network. Do not use the
   // default portals.yml because end-user workspaces often have a real user-layer

@@ -18,10 +18,17 @@
       <h2>Onboarding</h2>
       <div id="setup-status"></div>
       <label>Paste your CV (markdown)<textarea id="cv" rows="8"></textarea></label>
+      <label>…or upload your resume (PDF or .docx)
+        <input type="file" id="cv-file" accept=".pdf,.docx">
+      </label>
+      <div id="upload-status"></div>
       <button id="save-cv">Save CV</button>
       <fieldset><legend>Profile</legend>
         <input id="full_name" placeholder="Full name">
         <input id="email" placeholder="Email">
+        <input id="phone" placeholder="Phone">
+        <input id="linkedin" placeholder="LinkedIn URL">
+        <input id="github" placeholder="GitHub URL">
         <input id="location" placeholder="Location (e.g. Kuala Lumpur, MY)">
         <input id="timezone" placeholder="Timezone (e.g. Asia/Kuala_Lumpur)">
         <input id="target_roles" placeholder="Target roles, comma-separated">

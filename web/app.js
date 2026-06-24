@@ -30,10 +30,31 @@ $('#save-cv').onclick = async () => {
     body: JSON.stringify({ markdown: $('#cv').value }) });
   loadStatus();
 };
+$('#cv-file').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  $('#upload-status').textContent = 'Extracting…';
+  try {
+    const r = await fetch('/api/setup/cv/upload?filename=' + encodeURIComponent(file.name),
+      { method: 'POST', body: file });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
+    const { cvText, fields } = await r.json();
+    $('#cv').value = cvText;
+    const setIf = (id, v) => { if (v) $('#' + id).value = v; };
+    setIf('full_name', fields.name); setIf('email', fields.email); setIf('phone', fields.phone);
+    setIf('linkedin', fields.linkedin); setIf('github', fields.github);
+    $('#upload-status').textContent = 'Extracted ✓ — review the fields below, then Save CV / Save Profile.';
+    loadStatus();
+  } catch (err) {
+    showError('Upload failed: ' + err.message);
+    $('#upload-status').textContent = '';
+  }
+};
 $('#save-profile').onclick = async () => {
   await api('/api/setup/profile', { method:'POST', headers:{'content-type':'application/json'},
     body: JSON.stringify({
       full_name: $('#full_name').value, email: $('#email').value, location: $('#location').value,
+      phone: $('#phone').value, linkedin: $('#linkedin').value, github: $('#github').value,
       timezone: $('#timezone').value, salary_target: $('#salary_target').value,
       target_roles: $('#target_roles').value.split(',').map(s=>s.trim()).filter(Boolean) }) });
   loadStatus();
