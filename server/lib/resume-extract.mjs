@@ -1,4 +1,5 @@
 // server/lib/resume-extract.mjs
+// Pinned to pdf-parse v1 (package.json ^1.1.1): v2.x dropped the /lib entry and changed the API.
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import mammoth from 'mammoth';
 import { extname } from 'path';

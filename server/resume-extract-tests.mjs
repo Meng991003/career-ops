@@ -25,5 +25,10 @@ let code = '';
 try { await extractText(Buffer.from('hi'), 'notes.txt'); } catch (e) { code = e.code; }
 ok(code === 'UNSUPPORTED_FORMAT', 'unsupported extension throws UNSUPPORTED_FORMAT');
 
+let emptyCode = '';
+try { await extractText(readFileSync(join(HERE, 'fixtures/empty.docx')), 'empty.docx'); }
+catch (e) { emptyCode = e.code; }
+ok(emptyCode === 'EMPTY_EXTRACTION', 'blank document throws EMPTY_EXTRACTION');
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
