@@ -9,9 +9,18 @@ const TYPES = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
 export function readJsonBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
-    req.on('data', c => { data += c; if (data.length > 8e6) req.destroy(); });
-    req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); } });
-    req.on('error', reject);
+    let done = false;
+    const finish = (fn, val) => { if (!done) { done = true; fn(val); } };
+    req.on('data', c => {
+      if (done) return;
+      data += c;
+      if (data.length > 8e6) { req.destroy(); finish(reject, new Error('payload too large (>8MB)')); }
+    });
+    req.on('end', () => {
+      if (done) return;
+      try { finish(resolve, data ? JSON.parse(data) : {}); } catch (e) { finish(reject, e); }
+    });
+    req.on('error', e => finish(reject, e));
   });
 }
 
