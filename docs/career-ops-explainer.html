@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Career-Ops — What it is & how to run your job search</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2230; --ink:#e6edf3;
+    --muted:#9aa7b4; --line:#2a3240; --accent:#5b8cff; --accent2:#3fb950;
+    --warn:#d29922; --danger:#f85149; --chip:#21304a;
+    --mono:"SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:980px;margin:0 auto;padding:0 22px}
+  header.hero{padding:64px 0 40px;border-bottom:1px solid var(--line);background:radial-gradient(1200px 400px at 50% -120px,rgba(91,140,255,.18),transparent)}
+  .eyebrow{font-family:var(--mono);font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+  h1{font-size:42px;line-height:1.1;margin:14px 0 10px;letter-spacing:-.02em}
+  .sub{font-size:19px;color:var(--muted);max-width:680px}
+  .stats{display:flex;gap:26px;flex-wrap:wrap;margin-top:26px}
+  .stat b{display:block;font-size:26px;color:var(--accent2)}
+  .stat span{font-size:13px;color:var(--muted)}
+  section{padding:44px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:27px;letter-spacing:-.01em;margin:0 0 6px}
+  h2 .num{font-family:var(--mono);color:var(--accent);font-size:18px;margin-right:10px}
+  .lead{color:var(--muted);margin:0 0 22px;max-width:740px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px}
+  .card h3{margin:0 0 6px;font-size:16px}
+  .card p{margin:0;font-size:14px;color:var(--muted)}
+  .tag{display:inline-block;font-family:var(--mono);font-size:11px;color:var(--accent);background:var(--chip);border-radius:6px;padding:2px 8px;margin-bottom:8px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 6px}
+  pre{background:#0b0f16;border:1px solid var(--line);border-radius:10px;padding:14px 16px;overflow:auto;font-family:var(--mono);font-size:13px;line-height:1.55}
+  pre .c{color:#6b7785}
+  pre .g{color:var(--accent2)}
+  .flow{counter-reset:step;display:grid;gap:12px}
+  .step{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px 16px 64px}
+  .step::before{counter-increment:step;content:counter(step);position:absolute;left:16px;top:16px;width:32px;height:32px;border-radius:50%;background:var(--accent);color:#0b0f16;font-weight:700;display:grid;place-items:center;font-family:var(--mono)}
+  .step h3{margin:0 0 4px;font-size:16px}
+  .step p{margin:0;color:var(--muted);font-size:14px}
+  table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+  th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+  td code{white-space:nowrap}
+  .callout{border-radius:12px;padding:16px 18px;border:1px solid;display:flex;gap:12px;align-items:flex-start}
+  .callout .ic{font-size:20px;line-height:1.3}
+  .callout.warn{background:rgba(210,153,34,.08);border-color:rgba(210,153,34,.4)}
+  .callout.ok{background:rgba(63,185,80,.08);border-color:rgba(63,185,80,.4)}
+  .callout.info{background:rgba(91,140,255,.08);border-color:rgba(91,140,255,.4)}
+  .callout p{margin:0;font-size:14.5px}
+  .status-row{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 0}
+  .pill{font-family:var(--mono);font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid var(--line)}
+  .pill.miss{color:var(--danger);border-color:rgba(248,81,73,.45);background:rgba(248,81,73,.08)}
+  .pill.have{color:var(--accent2);border-color:rgba(63,185,80,.45);background:rgba(63,185,80,.08)}
+  footer{padding:36px 0 60px;color:var(--muted);font-size:13px}
+  .muted{color:var(--muted)}
+  .kbd{font-family:var(--mono);background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:1px 7px;font-size:.85em}
+  ul.tight{margin:8px 0;padding-left:20px}
+  ul.tight li{margin:4px 0}
+</style>
+</head>
+<body>
+<header class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Repository explainer</div>
+    <h1>Career-Ops</h1>
+    <p class="sub">An AI-driven job-search pipeline that runs inside your AI coding CLI (Claude Code, OpenCode, Codex, Gemini/Antigravity…). It evaluates job offers, writes tailored CVs &amp; cover letters, scans company career portals, and tracks every application — so you apply to fewer, better-matched roles.</p>
+    <div class="stats">
+      <div class="stat"><b>740+</b><span>offers evaluated by its author</span></div>
+      <div class="stat"><b>100+</b><span>tailored CVs generated</span></div>
+      <div class="stat"><b>1</b><span>dream role landed (Head of Applied AI)</span></div>
+      <div class="stat"><b>v1.12.0</b><span>this checkout</span></div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- WHAT IT IS -->
+<section>
+  <h2><span class="num">01</span>What this repo actually is</h2>
+  <p class="lead">It's <strong>not</strong> a web app you launch. It's a folder of instructions + Node scripts that an AI agent reads and runs on your behalf. You talk to it in plain English in your CLI; it reads your CV and profile, then executes the right "mode." The philosophy: <em>companies use AI to filter candidates — this gives the candidate AI to choose companies.</em> Quality over quantity, and a human (you) always makes the final call before anything is sent.</p>
+  <div class="grid">
+    <div class="card"><div class="tag">BRAIN</div><h3>modes/*.md</h3><p>Plain-language playbooks for each task: offer evaluation, apply, scan, cover letter, interview prep, negotiation. The AI follows these.</p></div>
+    <div class="card"><div class="tag">HANDS</div><h3>*.mjs scripts</h3><p>Zero-token deterministic tools: <code>scan.mjs</code>, <code>generate-pdf.mjs</code>, <code>check-liveness.mjs</code>, <code>merge-tracker.mjs</code> and more.</p></div>
+    <div class="card"><div class="tag">YOU</div><h3>cv.md · config/profile.yml</h3><p>Your data layer. Personalization lives here and is <strong>never</strong> overwritten by system updates.</p></div>
+    <div class="card"><div class="tag">MEMORY</div><h3>data/ · reports/ · interview-prep/</h3><p>Application tracker, per-offer evaluation reports, and an accumulating STAR+R interview story bank.</p></div>
+  </div>
+</section>
+
+<!-- WHAT IT DOES -->
+<section>
+  <h2><span class="num">02</span>What it does — the capabilities</h2>
+  <p class="lead">Everything runs through one command, <code>/career-ops</code>, with sub-modes. The big ones:</p>
+  <div class="grid">
+    <div class="card"><h3>🔎 Scan portals</h3><p>Hits Greenhouse / Ashby / Lever / Wellfound APIs directly for 45+ pre-set companies + your custom queries. Zero LLM cost.</p></div>
+    <div class="card"><h3>🧮 Evaluate an offer</h3><p>Paste a JD or URL → a 6-block report (role fit, CV match, level strategy, comp research, personalization, interview prep) + a Block-G legitimacy check that flags scams &amp; ghost jobs. Scored /5.</p></div>
+    <div class="card"><h3>📄 Generate a CV PDF</h3><p>ATS-optimized, keyword-injected CV rendered to PDF (also LaTeX/Overleaf export).</p></div>
+    <div class="card"><h3>✉️ Cover letters</h3><p>Research-backed, keyword-mirrored, with an in-chat approval gate before any PDF is made.</p></div>
+    <div class="card"><h3>📊 Track everything</h3><p>Every offer flows into <code>data/applications.md</code> with canonical statuses; a terminal dashboard lets you browse/filter.</p></div>
+    <div class="card"><h3>🎤 Interview prep</h3><p>Company-specific intel + a growing bank of 5–10 master STAR+Reflection stories that answer any behavioral question.</p></div>
+    <div class="card"><h3>🤝 Negotiation</h3><p>Salary frameworks, geo-discount pushback, competing-offer leverage scripts.</p></div>
+    <div class="card"><h3>⚡ Batch mode</h3><p>Evaluate many offers in parallel with headless CLI workers (<code>claude -p</code> / <code>opencode run</code>).</p></div>
+    <div class="card"><h3>🌍 Language modes</h3><p>Native eval modes for DE, FR, JA, AR, TR and more — used when you target non-English postings.</p></div>
+  </div>
+</section>
+
+<!-- CURRENT STATE -->
+<section>
+  <h2><span class="num">03</span>Your current setup state</h2>
+  <p class="lead">I ran the built-in doctor check (<code>node doctor.mjs --json</code>) on this checkout. <strong>The system is installed but not yet personalized</strong> — it doesn't know who you are, so step one is onboarding (below).</p>
+  <div class="callout warn">
+    <div class="ic">⚠️</div>
+    <div>
+      <p><strong>Onboarding needed.</strong> These required files are missing:</p>
+      <div class="status-row">
+        <span class="pill miss">cv.md — missing</span>
+        <span class="pill miss">config/profile.yml — missing</span>
+        <span class="pill miss">portals.yml — missing</span>
+        <span class="pill miss">modes/_profile.md — auto-copied on first run</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- HOW TO GET YOUR JOB SEARCH DONE -->
+<section>
+  <h2><span class="num">04</span>How to get your job search done with it</h2>
+  <p class="lead">You don't edit config by hand — you <em>talk</em> to the agent and it edits the files for you. Here's the loop, start to finish.</p>
+  <div class="flow">
+    <div class="step"><h3>Onboard (one time, ~5 min)</h3><p>Open your CLI in this folder and say: <code>I want to set up career-ops</code>. It'll ask for your CV (paste it, drop a LinkedIn URL, or just describe your background), your name/email/location, your target roles, and salary range. It writes <code>cv.md</code>, <code>config/profile.yml</code>, and <code>portals.yml</code> for you.</p></div>
+    <div class="step"><h3>Teach it who you are</h3><p>Tell it your "superpower," your best achievement, your deal-breakers (no on-site, no startups &lt;20 people, etc.). The more context, the sharper the filtering. Early evaluations are rough on purpose — it gets better as it learns you.</p></div>
+    <div class="step"><h3>Find roles — scan</h3><p>Say <code>/career-ops scan</code>. It pulls fresh openings from your configured company portals at zero token cost and drops new URLs into your pipeline inbox.</p></div>
+    <div class="step"><h3>Evaluate — paste &amp; assess</h3><p>Paste any job URL or JD (or <code>/career-ops pipeline</code> to process the inbox). You get a scored /5 report. <strong>Below 4.0/5 it will tell you not to apply</strong> — that's the point.</p></div>
+    <div class="step"><h3>Apply — generate &amp; review</h3><p>For a good match: <code>/career-ops pdf</code> for a tailored CV, <code>/career-ops cover</code> for a cover letter, <code>/career-ops apply</code> to fill a form. It always <strong>stops before Submit</strong> — you review and send.</p></div>
+    <div class="step"><h3>Track &amp; follow up</h3><p><code>/career-ops tracker</code> shows your pipeline; <code>/career-ops followup</code> calculates cadence; <code>/career-ops interview-prep</code> preps you when you land an interview.</p></div>
+  </div>
+  <div class="callout ok" style="margin-top:18px">
+    <div class="ic">✅</div>
+    <p><strong>Fastest path right now:</strong> open this folder in your CLI and type <code>/career-ops</code> to see the menu, or just say <em>"set me up"</em> to begin onboarding.</p>
+  </div>
+</section>
+
+<!-- COMMAND REFERENCE -->
+<section>
+  <h2><span class="num">05</span>Command cheat-sheet</h2>
+  <table>
+    <tr><th>Command</th><th>What it does</th></tr>
+    <tr><td><code>/career-ops</code></td><td>Show the command center menu</td></tr>
+    <tr><td><code>/career-ops {JD or URL}</code></td><td>Full auto-pipeline: evaluate → report → CV PDF → tracker entry</td></tr>
+    <tr><td><code>/career-ops scan</code></td><td>Scan job portals for new openings (zero token cost)</td></tr>
+    <tr><td><code>/career-ops pipeline</code></td><td>Process pending URLs in the inbox</td></tr>
+    <tr><td><code>/career-ops pdf</code></td><td>Generate an ATS-optimized CV PDF</td></tr>
+    <tr><td><code>/career-ops cover</code></td><td>Generate a tailored cover letter</td></tr>
+    <tr><td><code>/career-ops tracker</code></td><td>Application status overview</td></tr>
+    <tr><td><code>/career-ops interview-prep</code></td><td>Company-specific interview guide + story bank</td></tr>
+    <tr><td><code>/career-ops deep</code></td><td>Deep company research</td></tr>
+    <tr><td><code>/career-ops contacto</code></td><td>LinkedIn outreach message</td></tr>
+    <tr><td><code>/career-ops followup</code></td><td>Update &amp; calculate follow-up cadence</td></tr>
+    <tr><td><code>/career-ops batch</code></td><td>Parallel batch evaluation of many offers</td></tr>
+    <tr><td><code>/career-ops patterns</code></td><td>Analyze rejection patterns to improve targeting</td></tr>
+  </table>
+  <p class="muted" style="margin-top:14px;font-size:13px">Useful raw scripts (run with <code>node</code>): <code>doctor.mjs</code> (setup check) · <code>scan.mjs</code> (portal scan) · <code>check-liveness.mjs &lt;url&gt;</code> (is the posting still open?) · <code>verify-pipeline.mjs</code> (data health) · <code>generate-pdf.mjs</code> (HTML→PDF).</p>
+</section>
+
+<!-- PRINCIPLES -->
+<section>
+  <h2><span class="num">06</span>Two rules baked into the system</h2>
+  <div class="grid">
+    <div class="card"><div class="tag">ETHICS</div><h3>Human-in-the-loop, always</h3><p>It evaluates and drafts, but <strong>never submits an application for you</strong>. It also actively discourages low-fit applications (&lt;4.0/5) — respecting both your time and the recruiter's.</p></div>
+    <div class="card"><div class="tag">DATA CONTRACT</div><h3>Your data is safe from updates</h3><p>A strict two-layer split (<code>DATA_CONTRACT.md</code>): your CV, profile, reports and tracker are <em>never</em> auto-touched. Only system files update. So <code>npx @santifer/career-ops</code> updates won't clobber your work.</p></div>
+  </div>
+  <div class="callout info" style="margin-top:18px">
+    <div class="ic">💡</div>
+    <p>It's <strong>meant to be made yours.</strong> Want different archetypes, another language, custom companies, or different scoring weights? Just ask the agent — it edits the same files it reads. Say things like <em>"add these 5 companies to my portals"</em> or <em>"change the archetypes to data-engineering roles."</em></p>
+  </div>
+</section>
+
+</main>
+
+<footer class="wrap">
+  <p>Generated explainer for the <strong>career-ops</strong> repo (v1.12.0) · saved at <code>docs/career-ops-explainer.html</code>.<br>
+  Origin &amp; case study: <a href="https://santifer.io/career-ops-system">santifer.io/career-ops-system</a> · Source: <a href="https://github.com/santifer/career-ops">github.com/santifer/career-ops</a></p>
+</footer>
+
+</body>
+</html>
