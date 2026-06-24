@@ -21,3 +21,6 @@ It reuses the existing career-ops scripts and data files — no database.
 - The UI never submits an application and never adds tracker rows directly.
   It only updates Status/Notes of existing entries (data-contract safe).
 - All writes are restricted to user-layer paths; system files are never touched.
+- Updating an application's Status/Notes is available via the API
+  (`PATCH /api/applications/:num`) but a UI control for inline editing is not
+  wired in Phase 1 — the board and report view are read-only.

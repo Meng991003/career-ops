@@ -25,7 +25,9 @@ export function readJsonBody(req) {
 }
 
 export function sendJson(res, status, obj) {
-  const body = JSON.stringify(obj);
+  let body;
+  try { body = JSON.stringify(obj); }
+  catch { status = 500; body = JSON.stringify({ error: 'response serialization failed' }); }
   res.writeHead(status, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body) });
   res.end(body);
 }

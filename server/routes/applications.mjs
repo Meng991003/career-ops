@@ -2,7 +2,7 @@
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { parseTable, serializeRows, findRowByNum } from '../lib/markdown-table.mjs';
+import { parseTable, serializeRows, findRowByNum, spliceTable } from '../lib/markdown-table.mjs';
 import { resolveUserPath, REPO_ROOT } from '../lib/paths.mjs';
 import { readJsonBody, sendJson, atomicWrite } from '../lib/http.mjs';
 
@@ -34,8 +34,10 @@ export async function getOne(req, res, [num]) {
   const link = (row['Report'] || '').match(/\(([^)]+\.md)\)/);
   if (link) {
     const rel = link[1].replace(/^\.\.\//, '');
-    const abs = join(REPO_ROOT, rel);
-    if (existsSync(abs)) report = await readFile(abs, 'utf-8');
+    if (rel.startsWith('reports/')) {
+      const abs = join(REPO_ROOT, rel);
+      if (existsSync(abs)) report = await readFile(abs, 'utf-8');
+    }
   }
   sendJson(res, 200, { row, report });
 }
@@ -45,15 +47,11 @@ export async function patch(req, res, [num]) {
   if (body.status && !CANON.some(c => c.toLowerCase() === String(body.status).toLowerCase())) {
     return sendJson(res, 400, { error: `non-canonical status: ${body.status}` });
   }
-  const { headers, rows } = await loadTracker();
+  const { headers, rows, raw } = await loadTracker();
   const row = findRowByNum(rows, num);
   if (!row) return sendJson(res, 404, { error: 'not found' });
   if (body.status) row['Status'] = CANON.find(c => c.toLowerCase() === String(body.status).toLowerCase());
   if (body.notes !== undefined) row['Notes'] = String(body.notes).replace(/\n/g, ' ');
-  // Preserve the file's preamble (title line) above the table.
-  const raw = (await readFile(resolveUserPath(TRACKER), 'utf-8'));
-  const preamble = raw.split('\n').filter(l => !l.trim().startsWith('|')).join('\n').trimEnd();
-  const tableContent = serializeRows(headers, rows);
-  await atomicWrite(resolveUserPath(TRACKER), preamble ? `${preamble}\n\n${tableContent}` : tableContent);
+  await atomicWrite(resolveUserPath(TRACKER), spliceTable(raw, headers, rows));
   sendJson(res, 200, { ok: true, row });
 }

@@ -1,5 +1,13 @@
 const $ = s => document.querySelector(s);
-const api = (url, opts) => fetch(url, opts).then(r => r.json());
+function showError(msg) {
+  const b = $('#error-banner');
+  b.textContent = msg;
+  b.hidden = false;
+}
+const api = (url, opts) => fetch(url, opts).then(r => {
+  if (!r.ok) throw new Error(`${r.status} ${url}`);
+  return r.json();
+}).catch(e => { showError(e.message); throw e; });
 const STATES = ['Evaluated','Applied','Responded','Interview','Offer','Rejected','Discarded','SKIP'];
 
 function show(view) {
