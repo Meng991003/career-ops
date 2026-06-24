@@ -79,6 +79,21 @@ try {
   const savedPortals = yaml.load(readFileSync(portalsPath, 'utf-8'));
   ok(JSON.stringify(savedPortals.location_filter?.allow) === JSON.stringify(['Penang', 'Remote']),
     'preferred location mirrored into portals.yml location_filter.allow');
+
+  // Prefill endpoint reflects saved data.
+  const data1 = await (await fetch(`${base}/api/setup/data`)).json();
+  ok(data1.preferred_location === 'Penang / Remote', 'GET /api/setup/data returns saved preferred_location');
+  ok(data1.salary_period === 'monthly', 'GET /api/setup/data returns saved salary_period');
+
+  // Narrative round-trips through save → data, and a save with only narrative
+  // fields preserves earlier values (postProfile bases off the existing profile).
+  await jsonPost('/api/setup/profile',
+    { headline: 'FS Engineer', superpowers: 'Debugging\nVue/.NET', proof_points: 'Perf | 30% gains | https://x' });
+  const data2 = await (await fetch(`${base}/api/setup/data`)).json();
+  ok(data2.headline === 'FS Engineer', 'narrative headline persisted + returned');
+  ok(data2.superpowers === 'Debugging\nVue/.NET', 'superpowers round-trip as text');
+  ok(data2.proof_points === 'Perf | 30% gains | https://x', 'proof points round-trip as text');
+  ok(data2.salary_period === 'monthly', 'base-off-existing preserves salary_period across a narrative-only save');
 } finally {
   srv.kill();
   restore(cvPath, origCv);

@@ -8,6 +8,10 @@ import { readJsonBody, readRawBody, sendJson, atomicWrite } from '../lib/http.mj
 import { extractText } from '../lib/resume-extract.mjs';
 import { extractFields } from '../lib/resume-fields.mjs';
 import { parsePreferredLocations } from '../lib/locations.mjs';
+import { parseList, formatList, parseProofPoints, formatProofPoints } from '../lib/narrative.mjs';
+
+const PROFILE = 'config/profile.yml';
+const PROFILE_EXAMPLE = 'config/profile.example.yml';
 
 // Mirror the preferred-location list into portals.yml's location_filter.allow so
 // the zero-token scanner only surfaces jobs in those places. Reads portals.yml,
@@ -38,11 +42,15 @@ export async function postCv(req, res) {
 
 export async function postProfile(req, res) {
   const b = await readJsonBody(req);
-  const example = await readFile(join(REPO_ROOT, 'config/profile.example.yml'), 'utf-8');
-  const profile = yaml.load(example);
+  // Base off the user's EXISTING profile when present so fields the form doesn't
+  // cover are preserved; fall back to the example template for a fresh setup.
+  const profilePath = join(REPO_ROOT, PROFILE);
+  const src = existsSync(profilePath) ? profilePath : join(REPO_ROOT, PROFILE_EXAMPLE);
+  const profile = yaml.load(await readFile(src, 'utf-8'));
   if (!profile || !profile.candidate || !profile.target_roles || !profile.location || !profile.compensation) {
-    return sendJson(res, 500, { error: 'profile.example.yml template is missing or malformed' });
+    return sendJson(res, 500, { error: 'profile template is missing or malformed' });
   }
+  profile.narrative = profile.narrative || {};
   profile.candidate.full_name = b.full_name ?? profile.candidate.full_name;
   profile.candidate.email = b.email ?? profile.candidate.email;
   profile.candidate.location = b.location ?? profile.candidate.location;
@@ -54,10 +62,40 @@ export async function postProfile(req, res) {
   if (b.salary_target) profile.compensation.target_range = b.salary_target;
   if (b.salary_period) profile.compensation.period = b.salary_period;
   if (b.preferred_location) profile.location.preferred = b.preferred_location;
-  await atomicWrite(resolveUserPath('config/profile.yml'), yaml.dump(profile, { lineWidth: 100 }));
+  // Narrative fields are authoritative from the form (sent as raw text every save).
+  if (b.headline !== undefined) profile.narrative.headline = b.headline;
+  if (b.exit_story !== undefined) profile.narrative.exit_story = b.exit_story;
+  if (b.superpowers !== undefined) profile.narrative.superpowers = parseList(b.superpowers);
+  if (b.proof_points !== undefined) profile.narrative.proof_points = parseProofPoints(b.proof_points);
+  await atomicWrite(resolveUserPath(PROFILE), yaml.dump(profile, { lineWidth: 100 }));
   // Keep the scanner's location filter in step with the stated preference.
   await syncPortalsLocationFilter(parsePreferredLocations(b.preferred_location));
   sendJson(res, 200, { ok: true });
+}
+
+// Read current saved onboarding data, flattened into form-ready field values
+// (empty strings when nothing is saved yet). Drives prefill of the Setup form.
+export async function getData(req, res) {
+  const read = p => (existsSync(join(REPO_ROOT, p)) ? readFile(join(REPO_ROOT, p), 'utf-8') : null);
+  const profileRaw = await read(PROFILE);
+  const cvRaw = await read('cv.md');
+  const portalsRaw = await read('portals.yml');
+  const p = profileRaw ? (yaml.load(profileRaw) || {}) : {};
+  const cand = p.candidate || {}, loc = p.location || {}, comp = p.compensation || {};
+  const tr = p.target_roles || {}, nar = p.narrative || {};
+  const portals = portalsRaw ? (yaml.load(portalsRaw) || {}) : {};
+  const keywords = portals.title_filter?.positive;
+  sendJson(res, 200, {
+    cv: cvRaw || '',
+    full_name: cand.full_name || '', email: cand.email || '', phone: cand.phone || '',
+    linkedin: cand.linkedin || '', github: cand.github || '', location: cand.location || '',
+    preferred_location: loc.preferred || '', timezone: loc.timezone || '',
+    target_roles: Array.isArray(tr.primary) ? tr.primary.join(', ') : '',
+    salary_target: comp.target_range || '', salary_period: comp.period || 'monthly',
+    headline: nar.headline || '', exit_story: nar.exit_story || '',
+    superpowers: formatList(nar.superpowers), proof_points: formatProofPoints(nar.proof_points),
+    keywords: Array.isArray(keywords) ? keywords.join(', ') : '',
+  });
 }
 
 export async function postPortals(req, res) {

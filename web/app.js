@@ -24,7 +24,7 @@ function show(view) {
   document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.view === view));
   if (view === 'board') loadBoard();
   if (view === 'progress') loadProgress();
-  if (view === 'onboard') loadStatus();
+  if (view === 'onboard') { loadData(); loadStatus(); }
 }
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => show(b.dataset.view));
 
@@ -33,6 +33,15 @@ async function loadStatus() {
   $('#setup-status').textContent = s.onboardingNeeded
     ? `Setup needed — missing: ${s.missing.join(', ')}`
     : 'All set ✓';
+}
+// Pre-fill the Setup form with whatever's already saved.
+async function loadData() {
+  let d;
+  try { d = await api('/api/setup/data'); } catch { return; }
+  for (const [k, v] of Object.entries(d)) {
+    const el = $('#' + k);
+    if (el) el.value = v;
+  }
 }
 $('#save-cv').onclick = async () => {
   try {
@@ -71,6 +80,8 @@ $('#save-profile').onclick = async () => {
         phone: $('#phone').value, linkedin: $('#linkedin').value, github: $('#github').value,
         timezone: $('#timezone').value, salary_target: $('#salary_target').value,
         salary_period: $('#salary_period').value,
+        headline: $('#headline').value, exit_story: $('#exit_story').value,
+        superpowers: $('#superpowers').value, proof_points: $('#proof_points').value,
         target_roles: $('#target_roles').value.split(',').map(s=>s.trim()).filter(Boolean) }) });
     showOk('Profile saved ✓');
     loadStatus();
