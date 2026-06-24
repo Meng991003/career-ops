@@ -4,6 +4,15 @@ function showError(msg) {
   b.textContent = msg;
   b.hidden = false;
 }
+let okTimer;
+function showOk(msg) {
+  $('#error-banner').hidden = true;
+  const b = $('#ok-banner');
+  b.textContent = msg;
+  b.hidden = false;
+  clearTimeout(okTimer);
+  okTimer = setTimeout(() => { b.hidden = true; }, 3000);
+}
 const api = (url, opts) => fetch(url, opts).then(r => {
   if (!r.ok) throw new Error(`${r.status} ${url}`);
   return r.json();
@@ -26,9 +35,12 @@ async function loadStatus() {
     : 'All set ✓';
 }
 $('#save-cv').onclick = async () => {
-  await api('/api/setup/cv', { method:'POST', headers:{'content-type':'application/json'},
-    body: JSON.stringify({ markdown: $('#cv').value }) });
-  loadStatus();
+  try {
+    await api('/api/setup/cv', { method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ markdown: $('#cv').value }) });
+    showOk('CV saved ✓');
+    loadStatus();
+  } catch { /* api() already surfaced the error in the banner */ }
 };
 $('#cv-file').onchange = async (e) => {
   const file = e.target.files[0];
@@ -51,20 +63,26 @@ $('#cv-file').onchange = async (e) => {
   }
 };
 $('#save-profile').onclick = async () => {
-  await api('/api/setup/profile', { method:'POST', headers:{'content-type':'application/json'},
-    body: JSON.stringify({
-      full_name: $('#full_name').value, email: $('#email').value, location: $('#location').value,
-      preferred_location: $('#preferred_location').value,
-      phone: $('#phone').value, linkedin: $('#linkedin').value, github: $('#github').value,
-      timezone: $('#timezone').value, salary_target: $('#salary_target').value,
-      salary_period: $('#salary_period').value,
-      target_roles: $('#target_roles').value.split(',').map(s=>s.trim()).filter(Boolean) }) });
-  loadStatus();
+  try {
+    await api('/api/setup/profile', { method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({
+        full_name: $('#full_name').value, email: $('#email').value, location: $('#location').value,
+        preferred_location: $('#preferred_location').value,
+        phone: $('#phone').value, linkedin: $('#linkedin').value, github: $('#github').value,
+        timezone: $('#timezone').value, salary_target: $('#salary_target').value,
+        salary_period: $('#salary_period').value,
+        target_roles: $('#target_roles').value.split(',').map(s=>s.trim()).filter(Boolean) }) });
+    showOk('Profile saved ✓');
+    loadStatus();
+  } catch { /* api() already surfaced the error in the banner */ }
 };
 $('#save-portals').onclick = async () => {
-  await api('/api/setup/portals', { method:'POST', headers:{'content-type':'application/json'},
-    body: JSON.stringify({ positiveKeywords: $('#keywords').value.split(',').map(s=>s.trim()).filter(Boolean) }) });
-  loadStatus();
+  try {
+    await api('/api/setup/portals', { method:'POST', headers:{'content-type':'application/json'},
+      body: JSON.stringify({ positiveKeywords: $('#keywords').value.split(',').map(s=>s.trim()).filter(Boolean) }) });
+    showOk('Portals saved ✓');
+    loadStatus();
+  } catch { /* api() already surfaced the error in the banner */ }
 };
 
 async function loadBoard() {
