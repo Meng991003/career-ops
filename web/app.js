@@ -1,0 +1,72 @@
+const $ = s => document.querySelector(s);
+const api = (url, opts) => fetch(url, opts).then(r => r.json());
+const STATES = ['Evaluated','Applied','Responded','Interview','Offer','Rejected','Discarded','SKIP'];
+
+function show(view) {
+  for (const id of ['onboard','board','progress']) $('#'+id).hidden = id !== view;
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  if (view === 'board') loadBoard();
+  if (view === 'progress') loadProgress();
+  if (view === 'onboard') loadStatus();
+}
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => show(b.dataset.view));
+
+async function loadStatus() {
+  const s = await api('/api/setup/status');
+  $('#setup-status').textContent = s.onboardingNeeded
+    ? `Setup needed — missing: ${s.missing.join(', ')}`
+    : 'All set ✓';
+}
+$('#save-cv').onclick = async () => {
+  await api('/api/setup/cv', { method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify({ markdown: $('#cv').value }) });
+  loadStatus();
+};
+$('#save-profile').onclick = async () => {
+  await api('/api/setup/profile', { method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify({
+      full_name: $('#full_name').value, email: $('#email').value, location: $('#location').value,
+      timezone: $('#timezone').value, salary_target: $('#salary_target').value,
+      target_roles: $('#target_roles').value.split(',').map(s=>s.trim()).filter(Boolean) }) });
+  loadStatus();
+};
+$('#save-portals').onclick = async () => {
+  await api('/api/setup/portals', { method:'POST', headers:{'content-type':'application/json'},
+    body: JSON.stringify({ positiveKeywords: $('#keywords').value.split(',').map(s=>s.trim()).filter(Boolean) }) });
+  loadStatus();
+};
+
+async function loadBoard() {
+  const { groups } = await api('/api/applications');
+  $('#board-cols').innerHTML = '';
+  for (const st of STATES) {
+    const rows = groups[st] || [];
+    const col = document.createElement('div'); col.className = 'col';
+    col.innerHTML = `<h3>${st} (${rows.length})</h3>`;
+    for (const r of rows) {
+      const card = document.createElement('div'); card.className = 'card';
+      card.textContent = `${r['Company']} — ${r['Role']} (${r['Score']||''})`;
+      card.onclick = () => openReport(r['#']);
+      col.appendChild(card);
+    }
+    $('#board-cols').appendChild(col);
+  }
+}
+
+async function openReport(num) {
+  const { row, report } = await api('/api/applications/' + encodeURIComponent(num));
+  $('#modal-body').textContent = report || `${row['Company']} — ${row['Role']}\n(no report file)`;
+  $('#modal').hidden = false;
+}
+$('#modal-close').onclick = () => $('#modal').hidden = true;
+
+async function loadProgress() {
+  const { groups } = await api('/api/applications');
+  const max = Math.max(1, ...STATES.map(s => (groups[s]||[]).length));
+  $('#funnel').innerHTML = STATES.map(s => {
+    const n = (groups[s]||[]).length;
+    return `<div>${s}: ${n}<div class="bar" style="width:${(n/max)*100}%"></div></div>`;
+  }).join('');
+}
+
+show('board');

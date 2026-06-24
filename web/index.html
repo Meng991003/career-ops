@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Career-Ops</title><link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header><h1>Career-Ops</h1>
+    <nav>
+      <button data-view="board" class="active">Applications</button>
+      <button data-view="progress">Progress</button>
+      <button data-view="onboard">Setup</button>
+    </nav>
+  </header>
+  <main>
+    <section id="onboard" hidden>
+      <h2>Onboarding</h2>
+      <div id="setup-status"></div>
+      <label>Paste your CV (markdown)<textarea id="cv" rows="8"></textarea></label>
+      <button id="save-cv">Save CV</button>
+      <fieldset><legend>Profile</legend>
+        <input id="full_name" placeholder="Full name">
+        <input id="email" placeholder="Email">
+        <input id="location" placeholder="Location (e.g. Kuala Lumpur, MY)">
+        <input id="timezone" placeholder="Timezone (e.g. Asia/Kuala_Lumpur)">
+        <input id="target_roles" placeholder="Target roles, comma-separated">
+        <input id="salary_target" placeholder="Salary target (e.g. RM120k-160k)">
+        <button id="save-profile">Save Profile</button>
+      </fieldset>
+      <fieldset><legend>Portals</legend>
+        <input id="keywords" placeholder="Title keywords, comma-separated">
+        <button id="save-portals">Save Portals</button>
+      </fieldset>
+    </section>
+    <section id="board"><h2>Applications</h2><div id="board-cols"></div></section>
+    <section id="progress" hidden><h2>Progress</h2><div id="funnel"></div></section>
+  </main>
+  <div id="modal" hidden><div id="modal-body"></div><button id="modal-close">Close</button></div>
+  <script src="/app.js"></script>
+</body>
+</html>
