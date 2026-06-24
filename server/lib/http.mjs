@@ -24,6 +24,23 @@ export function readJsonBody(req) {
   });
 }
 
+export function readRawBody(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let done = false;
+    const finish = (fn, val) => { if (!done) { done = true; fn(val); } };
+    req.on('data', c => {
+      if (done) return;
+      size += c.length;
+      if (size > 8e6) { req.destroy(); finish(reject, new Error('payload too large (>8MB)')); return; }
+      chunks.push(Buffer.from(c));
+    });
+    req.on('end', () => finish(resolve, Buffer.concat(chunks)));
+    req.on('error', e => finish(reject, e));
+  });
+}
+
 export function sendJson(res, status, obj) {
   let body;
   try { body = JSON.stringify(obj); }
