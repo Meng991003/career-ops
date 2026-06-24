@@ -21,6 +21,9 @@ export async function postProfile(req, res) {
   const b = await readJsonBody(req);
   const example = await readFile(join(REPO_ROOT, 'config/profile.example.yml'), 'utf-8');
   const profile = yaml.load(example);
+  if (!profile || !profile.candidate || !profile.target_roles || !profile.location || !profile.compensation) {
+    return sendJson(res, 500, { error: 'profile.example.yml template is missing or malformed' });
+  }
   profile.candidate.full_name = b.full_name ?? profile.candidate.full_name;
   profile.candidate.email = b.email ?? profile.candidate.email;
   profile.candidate.location = b.location ?? profile.candidate.location;
@@ -35,6 +38,9 @@ export async function postPortals(req, res) {
   const b = await readJsonBody(req);
   const example = await readFile(join(REPO_ROOT, 'templates/portals.example.yml'), 'utf-8');
   const portals = yaml.load(example);
+  if (!portals || typeof portals !== 'object') {
+    return sendJson(res, 500, { error: 'portals.example.yml template is missing or malformed' });
+  }
   if (Array.isArray(b.positiveKeywords) && b.positiveKeywords.length) {
     portals.title_filter = portals.title_filter || {};
     portals.title_filter.positive = b.positiveKeywords;
