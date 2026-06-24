@@ -53,6 +53,7 @@ export async function patch(req, res, [num]) {
   // Preserve the file's preamble (title line) above the table.
   const raw = (await readFile(resolveUserPath(TRACKER), 'utf-8'));
   const preamble = raw.split('\n').filter(l => !l.trim().startsWith('|')).join('\n').trimEnd();
-  await atomicWrite(resolveUserPath(TRACKER), `${preamble}\n\n${serializeRows(headers, rows)}`);
+  const tableContent = serializeRows(headers, rows);
+  await atomicWrite(resolveUserPath(TRACKER), preamble ? `${preamble}\n\n${tableContent}` : tableContent);
   sendJson(res, 200, { ok: true, row });
 }

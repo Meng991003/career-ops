@@ -15,9 +15,16 @@ const PORT = 3799;
 const srv = spawn(process.execPath, [join(ROOT, 'server/index.mjs')],
   { env: { ...process.env, CAREER_OPS_WEB_PORT: String(PORT) }, stdio: 'ignore' });
 
-await new Promise(r => setTimeout(r, 800)); // give it a moment to bind
-
 const base = `http://127.0.0.1:${PORT}`;
+async function waitForServer(maxMs = 10000) {
+  const deadline = Date.now() + maxMs;
+  while (Date.now() < deadline) {
+    try { const r = await fetch(`${base}/api/setup/status`); if (r.ok) return; } catch {}
+    await new Promise(r => setTimeout(r, 50));
+  }
+  throw new Error('server did not start in time');
+}
+await waitForServer();
 try {
   const status = await (await fetch(`${base}/api/setup/status`)).json();
   ok(typeof status.onboardingNeeded === 'boolean', 'GET /api/setup/status returns onboardingNeeded');
