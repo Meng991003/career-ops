@@ -29,6 +29,24 @@ eq(s.phone, '', 'no phone → empty');
 eq(s.linkedin, '', 'no linkedin → empty');
 eq(s.name, '', 'no confident name → empty');
 
+// Two-column / label-based resume linearized by pdf-parse: contact block with
+// labels, a section header before the name, skills phrases, then the name.
+const labeled = `PROFESSIONAL SUMMARY
+Dynamic full stack engineer with broad experience across teams and systems.
+CONTACT
+Address: Cheras, 14 50400
+Phone: +60182504378
+Email: www.meng705@gmail.com
+SKILLS
+Full-stack development
+Team collaboration
+WAI CHUN MENG
+Fullstack Software Engineer`;
+const L = extractFields(labeled);
+eq(L.email, 'meng705@gmail.com', 'strips spurious www. from email');
+eq(L.phone, '+60182504378', 'prefers the labeled Phone: line over an address digit run');
+eq(L.name, 'WAI CHUN MENG', 'skips section headers + skill phrases to find the name');
+
 eq(extractFields('').email, '', 'empty input is safe');
 eq(extractFields(null).name, '', 'null input is safe');
 
