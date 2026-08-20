@@ -20,8 +20,8 @@
 //   maxPages        — Maximum pages to fetch (default: 3, set to 1 for speed)
 //   countryCode     — Two-letter country code for building job detail URLs (default: "id")
 
-const DEFAULT_API = 'https://id.jobstreet.com/api/chalice-search/v4/search';
-const DEFAULT_SITE_KEY = 'ID-Main';
+const DEFAULT_API = 'https://sg.jobstreet.com/api/jobsearch/v5/search';
+const DEFAULT_SITE_KEY = 'SG-Main';
 const DEFAULT_PAGE_SIZE = 30;
 const DEFAULT_MAX_PAGES = 3;
 
@@ -74,27 +74,17 @@ function toEpochMs(value) {
 }
 
 /**
- * Parse a single Jobstreet/SEEK API result into the canonical Job shape.
- * The SEEK chalice-search API returns objects like:
- *   {
- *     id: 123456,
- *     title: "Senior Data Scientist",
- *     teaser: "...",
- *     bulletText: [...],
- *     branding: { companyName: "Tech Corp" },
- *     location: "Jakarta Selatan",
- *     listingDate: "2026-06-15T00:00:00Z",
- *     salary: "Rp 15.000.000 - 25.000.000 per month",
- *     jobUrl: "/id/job/123456",
- *     ...
- *   }
+ * Parse a single JobStreet/SEEK **v5** API result into the canonical Job shape.
  *
- * This parser is exported as a named export for unit tests.
+ * v5 differs from the retired v4 in three ways that matter here:
+ *   - there is no `jobUrl` field — the detail URL is `{base}/job/{id}`
+ *   - company lives in `advertiser.description` (`branding` carries only a logo)
+ *   - `location` became `locations[]`, keyed on `.label`
  *
- * @param {any} item — raw API result item
- * @param {string} baseUrl — scheme + hostname for resolving relative job URLs
+ * @param {any} item — raw v5 result item
+ * @param {string} baseUrl — scheme + hostname used to build the job URL
  * @param {string} fallbackCompany — company name fallback from the portal entry
- * @returns {{title: string, url: string, company: string, location: string, postedAt: number|undefined}|null}
+ * @returns {{title: string, url: string, company: string, location: string, postedAt?: number}|null}
  */
 export function parseJobstreetItem(item, baseUrl, fallbackCompany) {
   if (!item || typeof item !== 'object') return null;
@@ -102,36 +92,29 @@ export function parseJobstreetItem(item, baseUrl, fallbackCompany) {
   const title = (item.title || '').trim();
   if (!title) return null;
 
-  // Resolve job URL — can be relative (/id/job/123) or absolute
-  let url = '';
-  const rawUrl = item.jobUrl || '';
-  if (rawUrl) {
-    try {
-      // Try absolute first
-      const parsed = new URL(rawUrl);
-      if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
-        url = parsed.href;
-      }
-    } catch {
-      // Relative URL — prepend base
-      if (rawUrl.startsWith('/')) {
-        url = `${baseUrl}${rawUrl}`;
-      }
-    }
-  }
-  if (!url) return null;
+  const id = String(item.id ?? '').trim();
+  if (!id) return null;
 
-  // Validate URL hostname belongs to allowed set
+  // v5 has no jobUrl — build it, then validate the host we built it on.
+  let url;
   try {
-    const parsed = new URL(url);
+    const parsed = new URL(`/job/${encodeURIComponent(id)}`, baseUrl);
+    if (parsed.protocol !== 'https:') return null;
     if (!ALLOWED_JOBSTREET_HOSTS.has(parsed.hostname)) return null;
     url = parsed.href;
   } catch {
     return null;
   }
 
-  const company = (item.branding?.companyName || item.companyName || item.advertiser?.description || fallbackCompany || '').trim();
-  const location = (item.location || '').trim();
+  const company = (
+    item.advertiser?.description
+    || item.companyName
+    || item.branding?.name
+    || fallbackCompany
+    || ''
+  ).trim();
+
+  const location = (item.locations?.[0]?.label || '').trim();
   const postedAt = toEpochMs(item.listingDate);
 
   return { title, url, company, location, ...(postedAt != null ? { postedAt } : {}) };
@@ -151,9 +134,6 @@ function buildSearchUrl(apiUrl, params) {
   if (location) url.searchParams.set('where', location);
   url.searchParams.set('pageSize', String(pageSize || DEFAULT_PAGE_SIZE));
   url.searchParams.set('page', String(page || 1));
-  // Request Solr fields relevant for job listings — narrower than the default
-  // response which includes full ad body. Keeps payloads small.
-  url.searchParams.set('solrFields', 'id,title,location,listingDate,jobUrl,companyName,branding.companyName,advertiser.description,salary');
   return url.href;
 }
 
