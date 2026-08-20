@@ -73,7 +73,8 @@ export function parseLinkedInCards(html) {
   if (typeof html !== 'string' || !html) return [];
 
   const jobs = [];
-  for (const chunk of html.split('<li>').slice(1)) {
+  // Split on <li followed by > or whitespace to tolerate attributes like <li class="...">.
+  for (const chunk of html.split(/<li[\s>]/).slice(1)) {
     try {
       const title = pick(chunk, /base-search-card__title"[^>]*>([\s\S]*?)</);
       if (!title) continue;
@@ -140,7 +141,14 @@ export default {
       }
 
       const batch = parseLinkedInCards(html);
-      if (batch.length === 0) break;
+      if (batch.length === 0) {
+        // Distinguish "no results" from "parser broke".
+        // If HTML contains card markers but we parsed 0 cards, the endpoint markup likely changed.
+        if (html.includes('base-search-card')) {
+          throw new Error('linkedin-guest: fetched HTML contains card markers but 0 cards parsed — the guest endpoint markup likely changed');
+        }
+        break;
+      }
       all.push(...batch);
 
       if (batch.length < RESULTS_PER_PAGE) break;

@@ -74,5 +74,31 @@ assert(
   'one malformed card does not abort the batch'
 );
 
+section('parseLinkedInCards — markup variants');
+
+const CARD_WITH_CLASS = CARD.replace('<li>', '<li class="jobs-search__results-list-item">');
+const variant1 = parseLinkedInCards(CARD_WITH_CLASS);
+assert(variant1.length === 1, 'card with <li class="..."> tag parses');
+assert(variant1[0]?.title === 'Software Engineer', 'variant with class: title matches');
+assert(variant1[0]?.company === 'Grab', 'variant with class: company matches');
+
+const CARD_WITH_SPACE = CARD.replace('<li>', '<li >');
+const variant2 = parseLinkedInCards(CARD_WITH_SPACE);
+assert(variant2.length === 1, 'card with <li > (space before >) tag parses');
+assert(variant2[0]?.title === 'Software Engineer', 'variant with space: title matches');
+
+section('parseLinkedInCards — entity decoding');
+
+const CARD_WITH_ENTITY = CARD.replace('Grab', 'Smith &amp; Co');
+const entity = parseLinkedInCards(CARD_WITH_ENTITY);
+assert(entity.length === 1, 'card with HTML entity parses');
+assert(entity[0]?.company === 'Smith & Co', 'HTML entity &amp; decodes to &');
+
+section('parseLinkedInCards — malformed vs empty');
+
+const BROKEN_MARKUP = '<div class="base-search-card">Not a real card</div>';
+const broken = parseLinkedInCards(BROKEN_MARKUP);
+assert(broken.length === 0, 'HTML with base-search-card but no card structure returns empty array');
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
