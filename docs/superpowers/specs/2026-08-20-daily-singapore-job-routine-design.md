@@ -255,12 +255,37 @@ experience, current employer.
 
 ### Delta 5 — `daily-digest.mjs`
 
-Reads `data/pipeline.md` (scanner output) and `data/applications.md` (applied
-history), writes `output/digest-YYYY-MM-DD.html`.
+Writes `output/digest-YYYY-MM-DD.html`.
 
-- Top 10 unapplied roles, ranked by career-ops fit score.
+**Data-source correction.** The scan's durable outputs cannot produce this
+digest on their own:
+
+- `data/pipeline.md` rows are `- [ ] {url} | {company} | {title}` — no salary,
+  no location, no posted date, no score.
+- `data/scan-history.tsv` adds portal, location, and `first_seen`, but no salary.
+- **The A–F fit score does not exist at scan time.** It is produced by the
+  interactive 6-block evaluation, one job at a time. Ranking 10 roles by it
+  would mean running 10 full evaluations before the candidate has picked
+  anything — the expensive step the digest exists to help them avoid.
+
+Persisting the missing fields would mean modifying `scan.mjs`, an existing
+upstream file that updates overwrite.
+
+So the digest performs its **own** provider fetch — a second zero-token pass
+over the same public endpoints, negligible at one run per day — reusing
+`providers/*` and `scan.mjs`'s already-exported filters rather than
+reimplementing them. It then intersects against `data/pipeline.md`'s `## Pending`
+URLs, so the scan remains the source of truth for what is new, and excludes
+anything present in `data/applications.md`.
+
+- Top 10 unapplied roles, ranked by a **cheap local heuristic** computed at
+  digest time: title-token overlap against `target_roles` and `archetypes` from
+  `config/profile.yml` (reusing `roleTokens` from `role-matcher.mjs`), plus
+  salary-clears-floor and recency. This is a triage ordering, explicitly not a
+  fit score, and the digest labels it as such so it is never mistaken for the
+  A–F evaluation.
 - Per row: title, company, location, salary (or an explicit
-  "salary undisclosed" marker), posted date, fit score, source, link.
+  "salary undisclosed" marker), posted date, triage score, source, link.
 - A second section listing applications submitted that day, so the file doubles
   as the post-application report. Regenerated after each submission, keeping one
   always-current artifact per day rather than a separate receipt file.
@@ -309,8 +334,14 @@ scan.mjs ← portals.yml
    → title_filter → location_filter → salary_filter
    → dedup vs data/applications.md      (drops anything already applied to)
    → fit-score vs config/profile.yml + cv.md
-   → data/pipeline.md
-   → daily-digest.mjs → output/digest-YYYY-MM-DD.html
+   → data/pipeline.md  +  data/scan-history.tsv   (durable record, cross-day dedup)
+
+daily-digest.mjs
+   ├─ own fetch via providers/* (rich fields: salary, posted date, location)
+   ├─ ∩ pipeline.md "## Pending"     (scan stays the authority on what is new)
+   ├─ ∖ data/applications.md          (drop anything already applied to)
+   ├─ rank by local triage heuristic  (NOT the A–F fit score)
+   └─→ output/digest-YYYY-MM-DD.html
 ```
 
 **Interactive, candidate-initiated:**
