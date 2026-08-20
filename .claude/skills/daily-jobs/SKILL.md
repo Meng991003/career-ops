@@ -54,34 +54,47 @@ any source failed.
 Ask which roles they want to pursue. Accept several. Do not evaluate anything
 they did not pick — evaluation is the expensive step.
 
-## Step 3 — Evaluate and verify each chosen role
+## Step 3 through Step 7 — Per-Job Cycle (Evaluate, Tailor, Apply)
 
-For each pick, in order:
+**CRITICAL:** Steps 3 through 7 form a complete per-job cycle that must finish
+entirely for ONE job — including both approval gates and submission — before
+moving to the next job. Gates are never batched across jobs. Approval for one
+job never carries to another.
+
+### Step 3 — Evaluate and verify
+
+For each picked role, in order:
 
 1. Run the career-ops evaluation (`modes/oferta.md` via the `career-ops` skill,
    or `auto-pipeline` from the URL) for the A–F score and the Block G
    scam / ghost-job check.
 2. Verify the posting is still live **before** generating anything:
    ```bash
-   node check-liveness.mjs --url "<job url>"
+   node check-liveness.mjs "<job url>"
    ```
    If it is dead, say so and drop it. Do not spend a tailored CV on a closed role.
 3. Report the A–F score. If it is below 4.0, say so and recommend against
    applying — but the decision is the candidate's.
 
-## Step 4 — Generate material — GATE 1
+### Step 4 — Generate material — GATE 1
 
-Generate the tailored CV and cover letter:
+Generate the tailored CV and cover letter by running the tailoring workflows:
 
-```bash
-node generate-pdf.mjs --report reports/<report>.md
-node generate-cover-letter.mjs --report reports/<report>.md
-```
+1. **Tailored CV:** Run `modes/pdf.md` to rewrite the CV using the job description
+   keywords and role-specific framing, then execute its final render step:
+   ```bash
+   node generate-pdf.mjs <input.html> output/cv-<candidate>-<company>-<date>.pdf [--format=letter|a4]
+   ```
+2. **Tailored cover letter:** Run `modes/cover.md` to draft the letter. When done,
+   generate the PDF:
+   ```bash
+   node generate-cover-letter.mjs --payload payload.json [--out output/path.pdf]
+   ```
 
-Show the candidate both, then **STOP**. Do not open a form until they approve
-this material. If they want changes, revise and show again.
+Show the candidate both outputs, then **STOP**. Do not open a form until they
+approve this material. If they want changes, revise and show again.
 
-## Step 5 — Fill the form
+### Step 5 — Fill the form
 
 Only after gate 1 passes.
 
@@ -100,9 +113,10 @@ Only after gate 1 passes.
    - `scope: per-job` → draft fresh from this job's report. Never reuse a stale
      per-job answer. Apply `voice-dna.md`.
    - **No match** → ask the candidate. Then persist it so it is never asked
-     again:
+     again. Compute today's date using the candidate's timezone (same as the
+     digest filename):
      ```bash
-     node -e "import('./answers.mjs').then(m=>m.appendAnswer({q:process.argv[1],match:JSON.parse(process.argv[2]),scope:process.argv[3],a:process.argv[4],updated:new Date().toISOString().slice(0,10)}))" "<q>" '["token1","token2"]' universal "<answer>"
+     node -e "Promise.all([import('./daily-digest.mjs'),import('js-yaml')]).then(async([d,y])=>{const {readFileSync}=await import('fs');console.log(d.digestDate(y.default.load(readFileSync('config/profile.yml','utf8'))))})" | xargs -I{} node -e "import('./answers.mjs').then(m=>m.appendAnswer({q:process.argv[1],match:JSON.parse(process.argv[2]),scope:process.argv[3],a:process.argv[4],updated:process.argv[5]}))" "<q>" '["token1","token2"]' universal "<answer>" "{}"
      ```
      Choose `match` tokens that are specific enough not to collide with an
      existing entry. Prefer `universal` only when the answer is genuinely
@@ -110,26 +124,40 @@ Only after gate 1 passes.
 5. Fill the fields. State which `answers.yml` entry matched each one, so a
    wrong match is visible rather than silent.
 
-## Step 6 — Review and submit — GATE 2
+### Step 6 — Review and submit — GATE 2
 
 1. Present every filled field for review, plus anything left blank.
 2. **STOP.** Wait for explicit approval of *this* application.
 3. On approval, click submit. On a CAPTCHA, stop and hand over.
 4. If they want edits, change them and present again.
 
-## Step 7 — Record and report
+### Step 7 — Record and report
 
 After a confirmed submission:
 
-1. Add it to the tracker:
+1. Reserve a report number:
    ```bash
-   node tracker.mjs add --url "<url>" --company "<company>" --role "<role>" --status Applied
+   node reserve-report-num.mjs
    ```
-2. Regenerate the digest so it reflects the submission:
+2. Write a single-line TSV to `batch/tracker-additions/{num}-{company-slug}.tsv`
+   with these 9 tab-separated columns (in order):
+   ```
+   {num}	{date}	{company}	{role}	Applied	{score}/5	{pdf_emoji}	[{num}](reports/{num}-{slug}-{date}.md)	{note}
+   ```
+   - `date` is YYYY-MM-DD
+   - `score` is the A-F evaluation score formatted `X.X/5`
+   - `pdf_emoji` is ✅ or ❌
+   - Report link is always root-relative `[num](reports/...)`; merge-tracker.mjs rewrites it
+   - Use the existing company+role if it already exists in applications.md — update it rather than duplicating
+3. Merge into the tracker:
+   ```bash
+   node merge-tracker.mjs
+   ```
+4. Regenerate the digest so it reflects the submission:
    ```bash
    node daily-digest.mjs
    ```
-3. Give the candidate the digest path and a one-line summary of what was
+5. Give the candidate the digest path and a one-line summary of what was
    submitted.
 
 ## When something goes wrong
