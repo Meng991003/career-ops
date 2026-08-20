@@ -115,28 +115,27 @@ export function parseSalaryLabel(label) {
   // an order-of-magnitude error.
   if (/\d\s*k\b/i.test(text)) return null;
 
-  // Extract only numbers directly preceded by a currency marker ($ or SGD).
-  // Track match positions to validate that exactly 2 figures form a contiguous range.
-  const matches = [...text.matchAll(/(?:\$|SGD)\s*(\d[\d,]*(?:\.\d+)?)/gi)];
-  const currencyFigures = matches
-    .map(m => ({
-      value: Number(m[1].replace(/,/g, '')),
-      startIdx: m.index,
-      endIdx: m.index + m[0].length,
-    }))
-    .filter(n => Number.isFinite(n.value));
+  // Find all money expressions in the label. A money expression is either:
+  //   RANGE:  <marker> NUM <sep> [<marker>] NUM
+  //   SINGLE: <marker> NUM
+  // where <marker> is $, S$, or SGD; NUM is digits with optional commas/decimals;
+  // and <sep> is -, –, —, or "to".
+  // Require EXACTLY ONE money expression (salary is either a single value or a range,
+  // never "salary + allowance").
+  const moneyPattern = /(?:\$|S\$|SGD)\s*(\d[\d,]*(?:\.\d+)?)(?:\s*(?:[-–—]|\bto\b)\s*(?:\$|S\$|SGD)?\s*(\d[\d,]*(?:\.\d+)?))?/gi;
+  const moneyMatches = [...text.matchAll(moneyPattern)];
 
-  if (currencyFigures.length === 0 || currencyFigures.length > 2) return null;
+  if (moneyMatches.length !== 1) return null;
 
-  // If exactly 2 figures, they must form a contiguous range (not "$X salary + $Y allowance").
-  // Between them: only whitespace and a single range separator (-, –, —, or "to").
-  if (currencyFigures.length === 2) {
-    const between = text.substring(currencyFigures[0].endIdx, currencyFigures[1].startIdx);
-    const rangePattern = /^\s*(?:[-–—]|\bto\b)\s*$/i;
-    if (!rangePattern.test(between)) return null;
-  }
+  const match = moneyMatches[0];
+  // match[1] is always the first number
+  // match[2] is the second number (only in ranges)
+  const firstNum = Number(match[1].replace(/,/g, ''));
+  const secondNum = match[2] ? Number(match[2].replace(/,/g, '')) : firstNum;
 
-  const numbers = currencyFigures.map(m => m.value);
+  if (!Number.isFinite(firstNum) || !Number.isFinite(secondNum)) return null;
+
+  const numbers = match[2] ? [firstNum, secondNum] : [firstNum];
 
   const monthlyEquivalents = numbers.filter(
     n => (multiplier === 12 ? n : n / 12) >= MIN_PLAUSIBLE_MONTHLY

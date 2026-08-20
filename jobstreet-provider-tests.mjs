@@ -128,6 +128,26 @@ assert(
     === JSON.stringify({ min: 60000, max: 84000, currency: 'SGD' }),
   'currency marker on both figures'
 );
+assert(
+  JSON.stringify(parseSalaryLabel('SGD 5500 - 9000 per month'))
+    === JSON.stringify({ min: 66000, max: 108000, currency: 'SGD' }),
+  'shared-currency range (only first marker)'
+);
+assert(
+  JSON.stringify(parseSalaryLabel('$4,000-6,000 per month'))
+    === JSON.stringify({ min: 48000, max: 72000, currency: 'SGD' }),
+  'compact range (no space before separator)'
+);
+assert(
+  JSON.stringify(parseSalaryLabel('$4,000 to 6,000 per month'))
+    === JSON.stringify({ min: 48000, max: 72000, currency: 'SGD' }),
+  'range with "to" and only first marker'
+);
+assert(
+  JSON.stringify(parseSalaryLabel('S$ 4,000 - 6,000 per month'))
+    === JSON.stringify({ min: 48000, max: 72000, currency: 'SGD' }),
+  'S$ prefix (alternate symbol)'
+);
 
 section('parseSalaryLabel — must return null (job then passes filter)');
 
