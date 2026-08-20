@@ -121,8 +121,16 @@ const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // "Philadelphia". Word-boundary lookarounds fix this while still matching
 // multi-word/symbol-bearing tokens like "c++" and "objective-c" correctly —
 // a plain `\b` does not, since `+` and `-` aren't word characters.
+//
+// Fix round 3: the trailing lookahead also rejected a plural "s" ("Silicon
+// Photonics Engineer", "Mainframes Support Engineer" escaped the penalty
+// entirely). An optional `s?` before the boundary check covers every regular
+// plural in the list (photonics, mainframes, FPGAs, DSPs, PLCs) without
+// weakening the leading lookbehind that blocks the round-2 false positives —
+// that lookbehind checks the character BEFORE the token, which this change
+// does not touch.
 const FOREIGN_STACK_PATTERNS = FOREIGN_STACK.map(
-  tok => new RegExp(`(?<![a-z0-9])${escapeRegex(tok)}(?![a-z0-9])`)
+  tok => new RegExp(`(?<![a-z0-9])${escapeRegex(tok)}s?(?![a-z0-9])`)
 );
 
 /**

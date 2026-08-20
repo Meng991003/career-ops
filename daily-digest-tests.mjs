@@ -140,6 +140,45 @@ assert(
   'a bare "c" inside "C#" does not trigger the foreign-stack penalty'
 );
 
+section('scoreJob — fix round 3 (foreign-stack matches plural forms)');
+
+// Each assertion below isolates a single foreign-stack token so a match can
+// only come from the token under test — pairing "photonic" with "dsp" (as
+// the round-2 regression title does) is exactly what hid this bug.
+for (const title of [
+  // now penalised: plural forms the trailing lookahead used to reject.
+  'Silicon Photonics Engineer',
+  'Photonics Design Engineer',
+  'Mainframes Support Engineer',
+  // still penalised: singular forms and other tokens, regression guards.
+  'Optical Photonic Engineer',
+  'Software Engineer (C / C++)',
+  'Mainframe COBOL Programmer',
+  'Embedded Software Engineer',
+  'Salesforce Developer',
+  'iOS Engineer (Objective-C)',
+]) {
+  assert(
+    scoreJob(job({ title }), PROFILE, NOW) < baseline,
+    `foreign-stack title (incl. plurals) scores below the bare "Software Engineer" baseline: ${title}`
+  );
+}
+
+for (const title of [
+  'Software Engineer - Great Opportunity',
+  'Full Stack Engineer, Career Opportunity',
+  'Software Engineer, Community Platform',
+  'Software Engineer - Immunity Research Platform',
+  'Software Engineer, Philadelphia',
+  'Backend Engineer - SWIFT Payments',
+  'Software Engineer, C# and TypeScript',
+]) {
+  assert(
+    scoreJob(job({ title }), PROFILE, NOW) >= baseline,
+    `round-2 false positive stays fixed after the plural change: ${title}`
+  );
+}
+
 section('digestDate');
 
 assert(
