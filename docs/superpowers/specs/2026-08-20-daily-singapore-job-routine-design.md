@@ -70,14 +70,25 @@ checking marks dead.
 career-ops is a clone of the OSS project `santifer/career-ops` with a self-updater
 (`npm run update`). Paths differ in whether local edits survive an update:
 
-| Path | Tracked by git | Survives update |
-|------|---------------|-----------------|
-| `config/profile.yml`, `portals.yml`, `cv.md`, `data/pipeline.md`, `data/applications.md`, `reports/*.md`, `output/*` | no (gitignored) | yes |
-| `providers/*.mjs`, `modes/*.md`, `.claude/skills/career-ops/SKILL.md` | yes | **no** |
+`update-system.mjs` restores its `SYSTEM_PATHS` with
+`git checkout <ref> -- <path>`. That writes only paths present in the target
+ref — it never wipes a directory. Three distinct cases follow, and the design
+depends on the distinction:
 
-Design consequence: new work goes into untracked paths or new files wherever
-possible. Exactly one delta touches a tracked file, and it is a genuine upstream
-bug fix worth submitting as a PR.
+| Case | Example | Survives update |
+|------|---------|-----------------|
+| User-layer file | `config/profile.yml`, `portals.yml`, `cv.md`, `data/*`, `output/*` | yes — the updater runs an explicit safety check and aborts if a user file is touched |
+| **New** file inside a `SYSTEM_PATHS` directory | `providers/linkedin-guest.mjs`, `.claude/skills/daily-jobs/SKILL.md`, `daily-digest.mjs` | yes — pathspec checkout leaves unknown files alone |
+| **Existing** upstream file, locally modified | `providers/jobstreet.mjs`, `.gitignore` | **no — overwritten** |
+
+Note that `providers/`, `.claude/skills/`, and `docs/` are all `SYSTEM_PATHS`
+entries. Being inside one is not itself the risk; *editing a file that exists
+upstream* is.
+
+Design consequence: prefer new files over edits to existing ones. Exactly two
+deltas modify existing upstream files — the JobStreet fix (a genuine bug worth
+upstreaming as a PR) and the `.gitignore` entry (mirrored into
+`.git/info/exclude` precisely because it will be reverted).
 
 ## Architecture
 
@@ -264,10 +275,15 @@ Self-contained HTML, no external assets, readable in both light and dark.
 The orchestration playbook, as a standalone project skill.
 
 **Deviation from the approved design, and why:** the approved design placed this
-at `modes/daily.md`, which would have required editing the router table in
-`.claude/skills/career-ops/SKILL.md`. Both are git-tracked and auto-updatable,
-so an update could clobber the mode and its routing. A standalone skill is one
-fewer file, needs no router edit, and cannot be clobbered.
+at `modes/daily.md`, which would have required adding a row to the router table
+in `.claude/skills/career-ops/SKILL.md`. That file exists upstream, so the row
+would be overwritten on the next `npm run update` — silently breaking the
+routine's entry point. A new standalone skill file is never overwritten (see the
+upstream-conflict table above), needs no router edit, and is one fewer file.
+
+Both `modes/` and `.claude/skills/` are `SYSTEM_PATHS` directories, so location
+alone confers no protection; what matters is that this is a *new* file rather
+than an edit to an existing one.
 
 The skill instructs the agent to read `modes/_shared.md` and `modes/_profile.md`
 first, inheriting career-ops' scoring rules, sources of truth, and the
