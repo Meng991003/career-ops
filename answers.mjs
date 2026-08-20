@@ -52,6 +52,9 @@ function validateEntry(entry, where) {
   if (entry.scope === 'universal' && (typeof entry.a !== 'string' || !entry.a.trim())) {
     throw new Error(`${at}: a 'universal' entry needs a non-empty \`a\``);
   }
+  if (entry.scope === 'per-job' && typeof entry.a === 'string' && entry.a.trim()) {
+    throw new Error(`${at}: a 'per-job' entry must not carry an \`a\` (answers are drafted fresh, never stored)`);
+  }
 }
 
 /**
@@ -70,13 +73,26 @@ export function loadAnswers(path = DEFAULT_ANSWERS_PATH) {
   const raw = readFileSync(path, 'utf-8');
   if (!raw.trim()) return [];
 
+  // Check if the file has substantive content (not just blanks/comments)
+  const substantive = raw
+    .split('\n')
+    .filter(line => {
+      const trimmed = line.trim();
+      return trimmed && !trimmed.startsWith('#');
+    })
+    .join('');
+
+  if (!substantive) return [];
+
   let parsed;
   try {
     parsed = yaml.load(raw);
   } catch (err) {
     throw new Error(`${path}: malformed YAML — ${err.message}`);
   }
-  if (parsed == null) return [];
+  if (parsed == null) {
+    throw new Error(`${path}: top level must be a list of entries`);
+  }
   if (!Array.isArray(parsed)) {
     throw new Error(`${path}: top level must be a list of entries`);
   }

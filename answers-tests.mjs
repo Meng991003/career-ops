@@ -112,6 +112,49 @@ try { appendAnswer({ q: 'no match key', scope: 'universal', updated: '2026-08-20
 assert(threw, 'appending an invalid entry throws');
 assert(loadAnswers(file).length === 3, 'failed append did not corrupt the file');
 
+section('loadAnswers — parse-result edge cases (null/scalar/mapping)');
+
+writeFileSync(file, 'null', 'utf-8');
+threw = false;
+try { loadAnswers(file); } catch { threw = true; }
+assert(threw, 'file containing "null" throws (not silently empty)');
+
+writeFileSync(file, '~', 'utf-8');
+threw = false;
+try { loadAnswers(file); } catch { threw = true; }
+assert(threw, 'file containing "~" (null alias) throws (not silently empty)');
+
+writeFileSync(file, '# this is just a comment\n# nothing else', 'utf-8');
+assert(loadAnswers(file).length === 0, 'comment-only file returns empty array (not an error)');
+
+writeFileSync(file, '"just a scalar string"', 'utf-8');
+threw = false;
+try { loadAnswers(file); } catch { threw = true; }
+assert(threw, 'file with scalar string throws');
+
+writeFileSync(file, '{ not: a, list: but, a: mapping }', 'utf-8');
+threw = false;
+try { loadAnswers(file); } catch { threw = true; }
+assert(threw, 'file with mapping (not list) throws');
+
+section('validateEntry — per-job restrictions');
+
+writeFileSync(file, VALID, 'utf-8');
+threw = false;
+try { appendAnswer({ q: 'test', match: ['x'], scope: 'per-job', a: 'STALE ANSWER', updated: '2026-08-20' }, file); } catch { threw = true; }
+assert(threw, 'per-job entry carrying an `a` throws (answers must be drafted fresh)');
+
+const perJobValid = [
+  { q: 'test q', match: ['x'], scope: 'per-job', updated: '2026-08-20' }
+];
+assert(matchAnswer(perJobValid, 'x') !== null, 'per-job entry with NO `a` loads and matches fine');
+
+section('validateEntry — universal requirements (regression)');
+
+threw = false;
+try { appendAnswer({ q: 'test', match: ['x'], scope: 'universal', updated: '2026-08-20' }, file); } catch { threw = true; }
+assert(threw, 'universal entry without `a` throws');
+
 rmSync(dir, { recursive: true, force: true });
 
 console.log(`\n${passed} passed, ${failed} failed`);
