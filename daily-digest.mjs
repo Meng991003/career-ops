@@ -125,7 +125,7 @@ function detectTrackerCols(lines) {
 /**
  * Rows of the application tracker the candidate has actually applied to.
  * @param {string} text — contents of data/applications.md
- * @returns {Array<{date: string, company: string, role: string, status: string, urls: string[]}>}
+ * @returns {Array<{date: string, company: string, role: string, status: string, urls: string[], notes: string}>}
  */
 export function parseAppliedRows(text) {
   const rows = [];
@@ -146,6 +146,7 @@ export function parseAppliedRows(text) {
       role: parts[cols.role] || '',
       status,
       urls: [...line.matchAll(/https?:\/\/[^\s|)\]]+/g)].map(m => m[0].trim()),
+      notes: parts[cols.notes] || '',
     });
   }
   return rows;
@@ -164,15 +165,31 @@ export function parseAppliedUrls(text) {
 }
 
 /**
+ * The date a row's application was actually submitted. The tracker's Date
+ * column is written by the evaluation (modes/oferta.md) and preserved
+ * byte-for-byte afterward, so it holds the EVALUATION date, not the
+ * submission date. Step 7 of the daily-jobs playbook writes the real
+ * submission date into the Notes cell (e.g. "Applied 2026-08-21. https://..."),
+ * so prefer a YYYY-MM-DD parsed out of Notes, falling back to the Date column
+ * when Notes carries no date.
+ * @param {{date: string, notes?: string}} row
+ * @returns {string}
+ */
+function submittedDate(row) {
+  const m = String(row?.notes || '').match(/\d{4}-\d{2}-\d{2}/);
+  return m ? m[0] : row.date;
+}
+
+/**
  * Applications submitted on `date`, shaped for renderDigest's applied section.
  * A row with no URL in its Notes cell cannot be linked, so it is skipped.
- * @param {Array<{date: string, company: string, role: string, urls: string[]}>} rows
+ * @param {Array<{date: string, company: string, role: string, urls: string[], notes?: string}>} rows
  * @param {string} date — YYYY-MM-DD, from digestDate (candidate's timezone)
  * @returns {Array<{company: string, title: string, url: string}>}
  */
 export function pickAppliedToday(rows, date) {
   return (rows || [])
-    .filter(r => r.date === date && r.urls.length > 0)
+    .filter(r => submittedDate(r) === date && r.urls.length > 0)
     .map(r => ({ company: r.company, title: r.role, url: r.urls[0] }));
 }
 
@@ -228,6 +245,11 @@ const FOREIGN_STACK_PATTERNS = FOREIGN_STACK.map(
 // Minimum skill-token length. Fix round 4 (I3): tokenizing the real
 // config/profile.yml yields two-character fragments ("as", "on", "ci", "cd")
 // that carry no stack signal at all.
+//
+// Fix round 5: this floor also discarded "c#" and "s3" — real tokens, and in
+// c#'s case the candidate's FIRST core skill. Scoped to letters-only tokens
+// below (see the filter in skillTokens) so a short token containing a digit
+// or symbol survives, while "as"/"on"/"ci"/"cd" still get dropped.
 const SKILL_MIN_LEN = 3;
 
 /**
@@ -238,7 +260,7 @@ const SKILL_MIN_LEN = 3;
  * @param {any} profile
  * @returns {Set<string>}
  */
-function skillTokens(profile) {
+export function skillTokens(profile) {
   // Only primary/secondary archetypes: "stretch" fit means the resume shows
   // no evidence of that skill (see config/profile.yml's own comments), so its
   // name must not seed the candidate's real vocabulary — e.g. a lone "ai"
@@ -254,7 +276,7 @@ function skillTokens(profile) {
   for (const src of sources) {
     for (const raw of String(src).toLowerCase().split(/[\s/+(),;-]+/)) {
       const w = raw.trim();
-      if (!w || SKILL_GENERIC.has(w) || w.length < SKILL_MIN_LEN) continue;
+      if (!w || SKILL_GENERIC.has(w) || (w.length < SKILL_MIN_LEN && /^[a-z]+$/.test(w))) continue;
       tokens.add(w);
       const dot = w.indexOf('.', 1); // internal dot, not a leading one like ".net"
       if (dot > 0 && dot >= SKILL_MIN_LEN) tokens.add(w.slice(0, dot));

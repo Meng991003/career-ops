@@ -6,9 +6,10 @@
  */
 
 import { readFileSync } from 'fs';
+import yaml from 'js-yaml';
 import {
   scoreJob, rankJobs, renderDigest, parseAppliedUrls, parseAppliedRows,
-  pickAppliedToday, parsePendingUrls, digestDate, collectJobs,
+  pickAppliedToday, parsePendingUrls, digestDate, collectJobs, skillTokens,
 } from './daily-digest.mjs';
 
 let passed = 0;
@@ -309,6 +310,46 @@ assert(today[0].company === 'Acme' && today[0].title === 'Software Engineer' && 
 assert(pickAppliedToday([], '2026-08-20').length === 0, 'no rows → empty applied section');
 assert(pickAppliedToday(TODAY_ROWS, '2026-08-21').length === 0, 'a different date selects nothing');
 
+// Fix round 2: the Date column holds the EVALUATION date (modes/oferta.md),
+// preserved byte-for-byte, so it can differ from the day the application was
+// actually submitted. Step 7 of the daily-jobs playbook writes the real
+// submission date into Notes ("Applied 2026-08-21. https://...").
+const NOTES_ROWS = [
+  {
+    date: '2026-08-18', company: 'Evaluated-Monday-Applied-Today', role: 'Backend Engineer',
+    urls: ['https://x/3'], notes: 'Applied 2026-08-20. https://x/3',
+  },
+  {
+    date: '2026-08-20', company: 'Evaluated-Today-Applied-Earlier', role: 'Data Engineer',
+    urls: ['https://x/4'], notes: 'Applied 2026-08-18. https://x/4',
+  },
+  {
+    date: '2026-08-20', company: 'NoDateInNotes-MatchesToday', role: 'SRE',
+    urls: ['https://x/5'], notes: 'https://x/5',
+  },
+  {
+    date: '2026-08-19', company: 'NoDateInNotes-DoesNotMatch', role: 'QA Engineer',
+    urls: ['https://x/6'], notes: 'https://x/6',
+  },
+];
+const todayWithNotes = pickAppliedToday(NOTES_ROWS, '2026-08-20');
+assert(
+  todayWithNotes.some(r => r.company === 'Evaluated-Monday-Applied-Today'),
+  'an earlier Date column with today\'s date in Notes IS selected for today'
+);
+assert(
+  !todayWithNotes.some(r => r.company === 'Evaluated-Today-Applied-Earlier'),
+  'today\'s Date column with an earlier date in Notes is NOT selected for today'
+);
+assert(
+  todayWithNotes.some(r => r.company === 'NoDateInNotes-MatchesToday'),
+  'no date in Notes falls back to the Date column (matching case)'
+);
+assert(
+  !todayWithNotes.some(r => r.company === 'NoDateInNotes-DoesNotMatch'),
+  'no date in Notes falls back to the Date column (non-matching case)'
+);
+
 section('renderDigest');
 
 const html = renderDigest({
@@ -397,6 +438,36 @@ for (const title of [
 assert(
   scoreJob(job({ title: 'Software Engineer, Sonnet' }), STACK_PROFILE, NOW) === stackBaseline,
   '".net" does not match inside an unrelated word ("Sonnet")'
+);
+
+section('scoreJob — fix round 5 (skill-length floor no longer discards c#/s3)');
+
+assert(
+  scoreJob(job({ title: 'Senior C# Engineer' }), PROFILE, NOW)
+  > scoreJob(job({ title: 'Backend Software Engineer (Java)' }), PROFILE, NOW),
+  'a pure C# title outscores a generic Java title'
+);
+assert(
+  scoreJob(job({ title: 'Senior C# Engineer' }), PROFILE, NOW)
+  > scoreJob(job({ title: 'Senior Engineer' }), PROFILE, NOW),
+  'the "c#" token itself is contributing (stack removed scores lower)'
+);
+
+const REAL_PROFILE = yaml.load(readFileSync('config/profile.yml', 'utf-8'));
+const realTokens = skillTokens(REAL_PROFILE);
+assert(realTokens.has('c#'), 'skillTokens(real profile.yml) includes "c#"');
+for (const junk of ['as', 'on', 'ci', 'cd']) {
+  assert(!realTokens.has(junk), `skillTokens(real profile.yml) still excludes "${junk}"`);
+}
+
+// Regression guard: restoring c#/s3 must not reopen the round-4 saturation
+// hole (27/481 real titles reaching full skill marks on junk tokens alone).
+// A generic "Backend Software Engineer" (no real stack named) must stay
+// below a title genuinely naming three of the candidate's technologies.
+assert(
+  scoreJob(job({ title: 'Backend Software Engineer' }), PROFILE, NOW)
+  < scoreJob(job({ title: 'Full Stack Software Engineer C#/.NET TypeScript' }), PROFILE, NOW),
+  'a title with no real stack named still scores below one naming three real skills'
 );
 
 section('renderDigest — salary is displayed MONTHLY (annual ÷ 12)');
