@@ -103,13 +103,27 @@ const SKILL_GENERIC = new Set([
 
 // ponytail: hand-maintained list of stacks the candidate has no experience
 // with, per the resume. There's no cheap way to derive "unfamiliar tech" —
-// extend this list as false negatives turn up in real digests.
+// extend/trim this list as false positives/negatives turn up in real digests.
+// "swift" was removed: in SG fintech listings it's overwhelmingly the SWIFT
+// interbank network ("SWIFT Payments"), not the Apple language — too noisy
+// a signal to keep as a plain word match.
 const FOREIGN_STACK = [
   'c++', 'embedded', 'firmware', 'verilog', 'vhdl', 'fpga', 'rtos', 'photonic',
   'dsp', 'cobol', 'mainframe', 'abap', 'salesforce', 'sap', 'oracle forms',
   'delphi', 'perl', 'matlab', 'labview', 'plc', 'scada', 'android native',
-  'swift', 'objective-c', 'unity', 'unreal', 'solidity',
+  'objective-c', 'unity', 'unreal', 'solidity',
 ];
+
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Fix round 2: a raw substring test (`title.includes(tok)`) hit "unity"
+// inside "opportunity"/"community"/"immunity" and "delphi" inside
+// "Philadelphia". Word-boundary lookarounds fix this while still matching
+// multi-word/symbol-bearing tokens like "c++" and "objective-c" correctly —
+// a plain `\b` does not, since `+` and `-` aren't word characters.
+const FOREIGN_STACK_PATTERNS = FOREIGN_STACK.map(
+  tok => new RegExp(`(?<![a-z0-9])${escapeRegex(tok)}(?![a-z0-9])`)
+);
 
 /**
  * Candidate's concrete technology vocabulary, tokenized from profile.yml
@@ -188,7 +202,7 @@ export function scoreJob(job, profile, now = Date.now()) {
   const skillScore = 40 * Math.min(1, skillHits / 3);
 
   // 3. Foreign-stack penalty (-25): a technology the candidate has none of.
-  const foreignPenalty = FOREIGN_STACK.some(tok => lowerTitle.includes(tok)) ? 25 : 0;
+  const foreignPenalty = FOREIGN_STACK_PATTERNS.some(re => re.test(lowerTitle)) ? 25 : 0;
 
   // Salary: a posted figure clearing the floor is a positive signal. No posted
   // salary is neutral, never a penalty — ~69% of listings post nothing.
@@ -354,6 +368,21 @@ ${failures.map(f => `        <li>${escapeHtml(f)}</li>`).join('\n')}
 `;
 }
 
+/**
+ * Digest date in the candidate's own timezone (config/profile.yml
+ * location.timezone). A 07:00 Asia/Kuala_Lumpur scheduled run is 23:00 UTC
+ * the PREVIOUS day, so using the UTC date would stamp every scheduled run
+ * with yesterday's date. Falls back to the UTC date if no timezone is set.
+ * @param {any} profile
+ * @param {Date} [now]
+ * @returns {string} YYYY-MM-DD
+ */
+export function digestDate(profile, now = new Date()) {
+  const tz = profile?.location?.timezone;
+  if (!tz) return now.toISOString().slice(0, 10);
+  return now.toLocaleDateString('en-CA', { timeZone: tz });
+}
+
 // ── CLI ────────────────────────────────────────────────────────────
 
 async function main() {
@@ -402,7 +431,7 @@ async function main() {
     }
   }
 
-  const date = new Date().toISOString().slice(0, 10);
+  const date = digestDate(profile);
   const html = renderDigest({
     jobs: rankJobs(collected, profile, TOP_N),
     applied: [],

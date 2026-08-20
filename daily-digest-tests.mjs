@@ -5,7 +5,8 @@
  * Run: node daily-digest-tests.mjs
  */
 
-import { scoreJob, rankJobs, renderDigest, parseAppliedUrls, parsePendingUrls } from './daily-digest.mjs';
+import { readFileSync } from 'fs';
+import { scoreJob, rankJobs, renderDigest, parseAppliedUrls, parsePendingUrls, digestDate } from './daily-digest.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -99,6 +100,69 @@ assert(
   scoreJob(job({ postedAt: NOW }), PROFILE, NOW)
   > scoreJob(job({ postedAt: NOW - 60 * 86400000 }), PROFILE, NOW),
   'salary and recency terms are unchanged: a fresher posting still beats a 60-day-old one'
+);
+
+section('scoreJob — fix round 2 (foreign-stack matches on word boundaries)');
+
+const baseline = scoreJob(job({ title: 'Software Engineer' }), PROFILE, NOW);
+
+for (const title of [
+  'Software Engineer (C / C++)',
+  'Mainframe COBOL Programmer',
+  'Embedded Software Engineer',
+  'Lead Software Engineer (Optical DSP Photonics)',
+  'Salesforce Developer',
+  'iOS Engineer (Objective-C)',
+]) {
+  assert(
+    scoreJob(job({ title }), PROFILE, NOW) < baseline,
+    `foreign-stack title scores below the bare "Software Engineer" baseline: ${title}`
+  );
+}
+
+for (const title of [
+  'Software Engineer - Great Opportunity',
+  'Full Stack Engineer, Career Opportunity',
+  'Software Engineer, Community Platform',
+  'Software Engineer - Immunity Research Platform',
+  'Software Engineer, Philadelphia',
+  'Backend Engineer - SWIFT Payments',
+  'Software Engineer',
+]) {
+  assert(
+    scoreJob(job({ title }), PROFILE, NOW) >= baseline,
+    `innocent title is NOT penalized, scores at or above baseline: ${title}`
+  );
+}
+
+assert(
+  scoreJob(job({ title: 'Software Engineer, C# and TypeScript' }), PROFILE, NOW) >= baseline,
+  'a bare "c" inside "C#" does not trigger the foreign-stack penalty'
+);
+
+section('digestDate');
+
+assert(
+  digestDate({ location: { timezone: 'Asia/Kuala_Lumpur' } }, new Date('2026-08-20T23:00:00Z')) === '2026-08-21',
+  'a 07:00 Asia/Kuala_Lumpur scheduled run (23:00 UTC the day before) gets the correct local date'
+);
+assert(
+  digestDate({}, new Date('2026-08-20T23:00:00Z')) === '2026-08-20',
+  'falls back to the UTC date when profile has no location.timezone'
+);
+assert(
+  digestDate({ location: { timezone: 'Asia/Kuala_Lumpur' } }, new Date('2026-08-21T04:00:00Z')) === '2026-08-21',
+  'midday local time is unaffected'
+);
+
+const cliSource = readFileSync('daily-digest.mjs', 'utf-8');
+assert(
+  cliSource.includes('const date = digestDate(profile)'),
+  'the CLI derives the digest date via digestDate(profile), not new Date().toISOString()'
+);
+assert(
+  !cliSource.includes('new Date().toISOString().slice(0, 10)'),
+  'the CLI no longer stamps the filename with the raw UTC date'
 );
 
 section('rankJobs');
