@@ -77,6 +77,65 @@ function toEpochMs(value) {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+// Minimum plausible monthly figure. Guards against parsing hourly rates or
+// stray numbers ("$200 per month") into a salary that would wrongly reject a
+// job. Anything below this yields null, so the job passes the filter instead.
+const MIN_PLAUSIBLE_MONTHLY = 1000;
+
+/**
+ * Parse a JobStreet `salaryLabel` free-text string into an ANNUALIZED
+ * `{min, max, currency}`, matching the convention of `parseCompensation` in
+ * providers/ashby.mjs and the shape `buildSalaryFilter` in scan.mjs consumes.
+ *
+ * Deliberately conservative: this handles only the unambiguous canonical form
+ * and returns null for everything else. `buildSalaryFilter` passes jobs with no
+ * salary data, so null means "show it, unpriced" — strictly safer than guessing
+ * a number that could wrongly reject a viable role. Real labels that must yield
+ * null include "World Class Benefits" and "$4k - $4500 p.m. + Aws,Bonus".
+ *
+ * @param {string|null|undefined} label
+ * @returns {{min: number, max: number, currency: string}|null}
+ */
+export function parseSalaryLabel(label) {
+  if (typeof label !== 'string') return null;
+  const text = label.trim();
+  if (!text) return null;
+
+  // Require an explicit currency marker.
+  if (!/\$|\bSGD\b/i.test(text)) return null;
+
+  // Require an explicit, unambiguous period. Abbreviations like "p.m." appear
+  // only in noisy free-text labels, so they are intentionally not accepted.
+  const multiplier = /per\s+month|monthly/i.test(text) ? 12
+    : /per\s+year|per\s+annum|annually|yearly/i.test(text) ? 1
+    : null;
+  if (multiplier === null) return null;
+
+  // Reject shorthand magnitudes ("$4k") — ambiguous enough that guessing risks
+  // an order-of-magnitude error.
+  if (/\d\s*k\b/i.test(text)) return null;
+
+  // Only comma-grouped or plain integers, optionally with decimals.
+  const numbers = [...text.matchAll(/\d[\d,]*(?:\.\d+)?/g)]
+    .map(m => Number(m[0].replace(/,/g, '')))
+    .filter(n => Number.isFinite(n));
+
+  const monthlyEquivalents = numbers.filter(
+    n => (multiplier === 12 ? n : n / 12) >= MIN_PLAUSIBLE_MONTHLY
+  );
+  if (monthlyEquivalents.length === 0) return null;
+
+  const annualized = monthlyEquivalents.map(n => n * multiplier);
+  return {
+    min: Math.min(...annualized),
+    max: Math.max(...annualized),
+    // Currency is hardcoded to SGD: the project is scoped to Singapore only,
+    // and the sole call site is sg.jobstreet.com where a bare "$" unambiguously
+    // means SGD. This is deliberate — see CLAUDE.md Task 2 for rationale.
+    currency: 'SGD',
+  };
+}
+
 /**
  * Parse a single JobStreet/SEEK **v5** API result into the canonical Job shape.
  *
@@ -191,7 +250,9 @@ export default {
 
       for (const item of data) {
         const job = parseJobstreetItem(item, baseUrl, fallbackCompany);
-        if (job) allJobs.push(job);
+        if (!job) continue;
+        const salary = parseSalaryLabel(item.salaryLabel);
+        allJobs.push(salary ? { ...job, salary } : job);
       }
 
       // Stop if we got fewer results than pageSize (last page)

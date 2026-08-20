@@ -9,7 +9,7 @@
  * the job URL must be built from `id`.
  */
 
-import { parseJobstreetItem } from './providers/jobstreet.mjs';
+import { parseJobstreetItem, parseSalaryLabel } from './providers/jobstreet.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -75,6 +75,50 @@ assert(
   parseJobstreetItem(REAL_ITEM, 'https://evil.example.com', '') === null,
   'untrusted base host → null'
 );
+
+section('parseSalaryLabel — real observed labels, annualized');
+
+assert(
+  JSON.stringify(parseSalaryLabel('$4,000 – $6,000 per month'))
+    === JSON.stringify({ min: 48000, max: 72000, currency: 'SGD' }),
+  'monthly en-dash range → annualized x12'
+);
+assert(
+  JSON.stringify(parseSalaryLabel('$6,000 - $7,000 per month'))
+    === JSON.stringify({ min: 72000, max: 84000, currency: 'SGD' }),
+  'monthly hyphen range → annualized x12'
+);
+assert(
+  JSON.stringify(parseSalaryLabel('$5,000 per month'))
+    === JSON.stringify({ min: 60000, max: 60000, currency: 'SGD' }),
+  'single monthly value → min === max'
+);
+assert(
+  JSON.stringify(parseSalaryLabel('$90,000 – $120,000 per year'))
+    === JSON.stringify({ min: 90000, max: 120000, currency: 'SGD' }),
+  'yearly range → not multiplied'
+);
+assert(
+  JSON.stringify(parseSalaryLabel('$90,000 per annum'))
+    === JSON.stringify({ min: 90000, max: 90000, currency: 'SGD' }),
+  '"per annum" recognised as yearly'
+);
+assert(
+  JSON.stringify(parseSalaryLabel('$7,000 – $5,000 per month'))
+    === JSON.stringify({ min: 60000, max: 84000, currency: 'SGD' }),
+  'reversed range is ordered min <= max'
+);
+
+section('parseSalaryLabel — must return null (job then passes filter)');
+
+assert(parseSalaryLabel('World Class Benefits') === null, 'real non-salary label → null');
+assert(parseSalaryLabel('$4k - $4500 p.m. + Aws,Bonus') === null, 'real "k" shorthand + noise → null');
+assert(parseSalaryLabel('') === null, 'empty string → null');
+assert(parseSalaryLabel(null) === null, 'null → null');
+assert(parseSalaryLabel(undefined) === null, 'undefined → null');
+assert(parseSalaryLabel('$5,000') === null, 'no period stated → null (cannot annualize safely)');
+assert(parseSalaryLabel('Competitive salary per month') === null, 'period but no numbers → null');
+assert(parseSalaryLabel('$200 – $400 per month') === null, 'implausibly low figures → null');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
