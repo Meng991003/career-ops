@@ -1,10 +1,15 @@
 // @ts-check
 /** @typedef {import('./_types.js').Provider} Provider */
 
-// Jobstreet / SEEK provider — hits the public chalice-search JSON API.
-// Jobstreet (jobstreet.com, jobstreet.co.id, etc.) and SEEK (seek.com.au,
-// seek.co.nz) share the same SEEK infrastructure and expose a public,
-// no-auth JSON search endpoint at /api/chalice-search/v4/search.
+// Jobstreet / SEEK provider — hits the public jobsearch JSON API (v5).
+// Jobstreet (jobstreet.com, jobstreet.co.id, jobstreet.sg, etc.) and SEEK
+// (seek.com.au, seek.co.nz) share the same SEEK infrastructure and expose a
+// public, no-auth JSON search endpoint at /api/jobsearch/v5/search.
+//
+// v5 API shape differs from the retired v4: there is no jobUrl field (the
+// detail URL is built from id as {base}/job/{id}), company lives in
+// advertiser.description (branding carries only logo), and location became
+// an array keyed on locations[0].label.
 //
 // This provider is designed for explicit `provider: jobstreet` in
 // portals.yml. Auto-detection from careers_url is not supported because
@@ -12,13 +17,12 @@
 // `provider: jobstreet` on a tracked_companies entry is the intended usage.
 //
 // Portal entry fields (all optional except `provider`):
-//   api             — Base search URL (default: https://id.jobstreet.com/api/chalice-search/v4/search)
-//   siteKey         — SEEK site key (default: "ID-Main" for Indonesia)
+//   api             — Base search URL (default: https://sg.jobstreet.com/api/jobsearch/v5/search)
+//   siteKey         — SEEK site key (default: "SG-Main" for Singapore)
 //   searchKeywords  — Search keywords, space-separated (default: reads from title_filter via keywords parameter)
 //   searchLocation  — Location filter string (default: none)
 //   pageSize        — Results per page (default: 30, max observed: 100)
 //   maxPages        — Maximum pages to fetch (default: 3, set to 1 for speed)
-//   countryCode     — Two-letter country code for building job detail URLs (default: "id")
 
 const DEFAULT_API = 'https://sg.jobstreet.com/api/jobsearch/v5/search';
 const DEFAULT_SITE_KEY = 'SG-Main';
