@@ -53,6 +53,54 @@ assert(
 assert(Number.isFinite(scoreJob(job({ postedAt: undefined }), PROFILE, NOW)), 'missing postedAt still scores');
 assert(Number.isFinite(scoreJob(job({ title: '' }), PROFILE, NOW)), 'empty title still scores (no crash)');
 
+section('scoreJob — fix round 1 (skill vocabulary breaks the tie)');
+
+assert(
+  scoreJob(job({ title: 'Full Stack Developer C#.NET' }), PROFILE, NOW)
+  > scoreJob(job({ title: 'Software Engineer (C / C++)' }), PROFILE, NOW),
+  'a C#.NET title outscores a C/C++ title'
+);
+assert(
+  scoreJob(job({ title: 'Backend Engineer (.NET / C#)' }), PROFILE, NOW)
+  > scoreJob(job({ title: 'Embedded Software Engineer' }), PROFILE, NOW),
+  'a .NET/C# title outscores an embedded-systems title'
+);
+assert(
+  scoreJob(job({ title: 'Full Stack Engineer (React/ NodeJS/ CMS)' }), PROFILE, NOW)
+  > scoreJob(job({ title: 'Lead Software Engineer (Optical DSP Photonics)' }), PROFILE, NOW),
+  'a React/NodeJS title outscores an optical-photonics title'
+);
+assert(
+  scoreJob(job({ title: 'Mainframe COBOL Programmer' }), PROFILE, NOW)
+  < scoreJob(job({ title: 'Software Engineer' }), PROFILE, NOW),
+  'a foreign-stack title scores below a bare "Software Engineer"'
+);
+assert(
+  scoreJob(job({ title: 'AI Engineer' }), PROFILE, NOW)
+  < scoreJob(job({ title: 'Full Stack Software Engineer' }), PROFILE, NOW),
+  'a stretch-archetype title scores below a primary-archetype title'
+);
+{
+  const s1 = scoreJob(job({
+    title: 'Embedded Firmware Systems Analyst',
+    salary: { min: 20000, max: 30000, currency: 'SGD' },
+    postedAt: NOW - 200 * 86400000,
+  }), PROFILE, NOW);
+  const s2 = scoreJob(job({ title: 'Full Stack Software Engineer' }), PROFILE, NOW);
+  assert(s1 >= 0 && s1 <= 100, 'score clamps to 0..100 (foreign-stack, no skill matches, stale, low salary)');
+  assert(s2 >= 0 && s2 <= 100, 'score clamps to 0..100 (a strong match)');
+}
+assert(
+  scoreJob(job({ salary: { min: 84000, max: 96000, currency: 'SGD' } }), PROFILE, NOW)
+  > scoreJob(job(), PROFILE, NOW),
+  'salary and recency terms are unchanged: salary clearing the floor still beats no salary'
+);
+assert(
+  scoreJob(job({ postedAt: NOW }), PROFILE, NOW)
+  > scoreJob(job({ postedAt: NOW - 60 * 86400000 }), PROFILE, NOW),
+  'salary and recency terms are unchanged: a fresher posting still beats a 60-day-old one'
+);
+
 section('rankJobs');
 
 const many = Array.from({ length: 25 }, (_, i) => job({ url: `https://sg.jobstreet.com/job/${i}` }));

@@ -86,11 +86,70 @@ export function parseAppliedUrls(text) {
 
 // ── Triage scoring ─────────────────────────────────────────────────
 
+// Fit round 1: fix round 1. bestOverlap on raw "software"/"engineer" tokens
+// saturated at 1.0 for ~389/470 real pipeline titles (any title containing
+// both words), making the digest a near-tie coin flip. Splitting the title
+// term into role-shape + concrete skill-match + foreign-stack penalty gives
+// the candidate's actual stack (C#/.NET, TypeScript, NestJS, ...) a say.
+
+const FIT_WEIGHT = { primary: 1, secondary: 0.7, stretch: 0.3 };
+
+// Generic role-altitude words that would otherwise pollute the skill
+// vocabulary (they already drive the role-shape term above).
+const SKILL_GENERIC = new Set([
+  'software', 'engineer', 'developer', 'senior', 'junior', 'mid', 'lead',
+  'full', 'stack', 'backend', 'frontend', 'and', 'with', 'the',
+]);
+
+// ponytail: hand-maintained list of stacks the candidate has no experience
+// with, per the resume. There's no cheap way to derive "unfamiliar tech" —
+// extend this list as false negatives turn up in real digests.
+const FOREIGN_STACK = [
+  'c++', 'embedded', 'firmware', 'verilog', 'vhdl', 'fpga', 'rtos', 'photonic',
+  'dsp', 'cobol', 'mainframe', 'abap', 'salesforce', 'sap', 'oracle forms',
+  'delphi', 'perl', 'matlab', 'labview', 'plc', 'scada', 'android native',
+  'swift', 'objective-c', 'unity', 'unreal', 'solidity',
+];
+
+/**
+ * Candidate's concrete technology vocabulary, tokenized from profile.yml
+ * (archetype names + narrative.superpowers), lowercased, generic words
+ * dropped. Internal dots (e.g. "node.js") also add the bare prefix ("node")
+ * so a title like "NodeJS" (no dot) still matches.
+ * @param {any} profile
+ * @returns {Set<string>}
+ */
+function skillTokens(profile) {
+  // Only primary/secondary archetypes: "stretch" fit means the resume shows
+  // no evidence of that skill (see config/profile.yml's own comments), so its
+  // name must not seed the candidate's real vocabulary — e.g. a lone "ai"
+  // token from a stretch "AI Engineer" archetype would otherwise let that
+  // archetype's own title self-match as a skill hit.
+  const sources = [
+    ...(profile?.target_roles?.archetypes || [])
+      .filter(a => a?.fit === 'primary' || a?.fit === 'secondary')
+      .map(a => a?.name || ''),
+    ...(profile?.narrative?.superpowers || []),
+  ];
+  const tokens = new Set();
+  for (const src of sources) {
+    for (const raw of String(src).toLowerCase().split(/[\s/+(),;-]+/)) {
+      const w = raw.trim();
+      if (!w || SKILL_GENERIC.has(w)) continue;
+      tokens.add(w);
+      const dot = w.indexOf('.', 1); // internal dot, not a leading one like ".net"
+      if (dot > 0) tokens.add(w.slice(0, dot));
+    }
+  }
+  return tokens;
+}
+
 /**
  * Score a job for triage ordering, 0-100. NOT the A-F fit score.
  *
- * Three signals: title overlap with target roles and archetypes (dominant),
- * whether a posted salary clears the floor, and recency.
+ * Four signals: role-shape overlap with target roles/archetypes (weighted by
+ * fit), concrete skill-vocabulary overlap, a foreign-stack penalty, and the
+ * unchanged salary + recency terms.
  *
  * @param {any} job
  * @param {any} profile — parsed config/profile.yml
@@ -99,23 +158,37 @@ export function parseAppliedUrls(text) {
  */
 export function scoreJob(job, profile, now = Date.now()) {
   const title = String(job?.title || '');
+  const lowerTitle = title.toLowerCase();
   const titleTokens = new Set(roleTokens(title));
 
+  // 1. Role-shape (max 25): overlap with target roles, weighted by archetype
+  // fit so a stretch archetype (e.g. "AI Engineer") can't score like a core one.
   const targets = [
-    ...(profile?.target_roles?.primary || []),
+    ...(profile?.target_roles?.primary || []).map(name => ({ name, weight: 1 })),
     ...(profile?.target_roles?.archetypes || [])
-      .filter(a => a?.fit === 'primary' || a?.fit === 'secondary')
-      .map(a => a?.name || ''),
+      .map(a => ({ name: a?.name || '', weight: FIT_WEIGHT[a?.fit] ?? 0 })),
   ];
-
-  let bestOverlap = 0;
-  for (const target of targets) {
-    const wanted = roleTokens(String(target));
+  let bestWeightedOverlap = 0;
+  for (const { name, weight } of targets) {
+    if (weight === 0) continue;
+    const wanted = roleTokens(String(name));
     if (wanted.length === 0) continue;
     const hits = wanted.filter(t => titleTokens.has(t)).length;
-    bestOverlap = Math.max(bestOverlap, hits / wanted.length);
+    bestWeightedOverlap = Math.max(bestWeightedOverlap, (hits / wanted.length) * weight);
   }
-  const titleScore = bestOverlap * 60;
+  const roleShapeScore = bestWeightedOverlap * 25;
+
+  // 2. Skill match (max 40): this is what actually breaks the tie between
+  // same-shaped titles, e.g. "Software Engineer (C/C++)" vs "...C#.NET".
+  const vocab = skillTokens(profile);
+  let skillHits = 0;
+  for (const tok of vocab) {
+    if (lowerTitle.includes(tok)) skillHits++;
+  }
+  const skillScore = 40 * Math.min(1, skillHits / 3);
+
+  // 3. Foreign-stack penalty (-25): a technology the candidate has none of.
+  const foreignPenalty = FOREIGN_STACK.some(tok => lowerTitle.includes(tok)) ? 25 : 0;
 
   // Salary: a posted figure clearing the floor is a positive signal. No posted
   // salary is neutral, never a penalty — ~69% of listings post nothing.
@@ -132,7 +205,8 @@ export function scoreJob(job, profile, now = Date.now()) {
     recencyScore = Math.max(0, 15 * (1 - ageDays / 45));
   }
 
-  return Math.round(titleScore + salaryScore + recencyScore);
+  const total = roleShapeScore + skillScore - foreignPenalty + salaryScore + recencyScore;
+  return Math.round(Math.min(100, Math.max(0, total)));
 }
 
 /** Annual salary floor from profile.compensation.minimum ("SGD6000" → 72000). */
