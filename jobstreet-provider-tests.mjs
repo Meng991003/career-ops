@@ -118,6 +118,16 @@ assert(
     === JSON.stringify({ min: 72000, max: 72000, currency: 'SGD' }),
   'regression: simple single-figure case'
 );
+assert(
+  JSON.stringify(parseSalaryLabel('$4,000 to $6,000 per month'))
+    === JSON.stringify({ min: 48000, max: 72000, currency: 'SGD' }),
+  '"to" is a valid range separator'
+);
+assert(
+  JSON.stringify(parseSalaryLabel('SGD 5,000 – SGD 7,000 per month'))
+    === JSON.stringify({ min: 60000, max: 84000, currency: 'SGD' }),
+  'currency marker on both figures'
+);
 
 section('parseSalaryLabel — must return null (job then passes filter)');
 
@@ -131,6 +141,8 @@ assert(parseSalaryLabel('Competitive salary per month') === null, 'period but no
 assert(parseSalaryLabel('$200 – $400 per month') === null, 'implausibly low figures → null');
 assert(parseSalaryLabel('$4,000 - $5,000 per month + $1,500 transport allowance') === null, '3 currency figures → null (too complex)');
 assert(parseSalaryLabel('$3,000 – $4,000 per month + $1,200 allowance') === null, '3 currency figures → null (too complex)');
+assert(parseSalaryLabel('$4,000 per month + $1,200 allowance') === null, '2 figures NOT forming a range → null');
+assert(parseSalaryLabel('$6,000 per month + $1,500 relocation') === null, '2 figures NOT forming a range → null');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

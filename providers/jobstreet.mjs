@@ -116,18 +116,29 @@ export function parseSalaryLabel(label) {
   if (/\d\s*k\b/i.test(text)) return null;
 
   // Extract only numbers directly preceded by a currency marker ($ or SGD).
-  // A number without a currency marker is not a salary figure and is ignored.
-  // This rejects labels with stray numbers like "$5,000 per month (start Jan 2026)"
-  // where 2026 has no $ prefix and is safely ignored.
-  const currencyFigures = [...text.matchAll(/(?:\$|SGD)\s*(\d[\d,]*(?:\.\d+)?)/gi)]
-    .map(m => Number(m[1].replace(/,/g, '')))
-    .filter(n => Number.isFinite(n));
+  // Track match positions to validate that exactly 2 figures form a contiguous range.
+  const matches = [...text.matchAll(/(?:\$|SGD)\s*(\d[\d,]*(?:\.\d+)?)/gi)];
+  const currencyFigures = matches
+    .map(m => ({
+      value: Number(m[1].replace(/,/g, '')),
+      startIdx: m.index,
+      endIdx: m.index + m[0].length,
+    }))
+    .filter(n => Number.isFinite(n.value));
 
-  // Reject labels with more than 2 currency figures — they are too complex to parse safely.
-  // This catches "$4,000 - $5,000 per month + $1,500 allowance" (3 figures) → null.
   if (currencyFigures.length === 0 || currencyFigures.length > 2) return null;
 
-  const monthlyEquivalents = currencyFigures.filter(
+  // If exactly 2 figures, they must form a contiguous range (not "$X salary + $Y allowance").
+  // Between them: only whitespace and a single range separator (-, –, —, or "to").
+  if (currencyFigures.length === 2) {
+    const between = text.substring(currencyFigures[0].endIdx, currencyFigures[1].startIdx);
+    const rangePattern = /^\s*(?:[-–—]|\bto\b)\s*$/i;
+    if (!rangePattern.test(between)) return null;
+  }
+
+  const numbers = currencyFigures.map(m => m.value);
+
+  const monthlyEquivalents = numbers.filter(
     n => (multiplier === 12 ? n : n / 12) >= MIN_PLAUSIBLE_MONTHLY
   );
   if (monthlyEquivalents.length === 0) return null;
