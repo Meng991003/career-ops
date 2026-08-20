@@ -6,7 +6,10 @@
  */
 
 import { readFileSync } from 'fs';
-import { scoreJob, rankJobs, renderDigest, parseAppliedUrls, parsePendingUrls, digestDate } from './daily-digest.mjs';
+import {
+  scoreJob, rankJobs, renderDigest, parseAppliedUrls, parseAppliedRows,
+  pickAppliedToday, parsePendingUrls, digestDate, collectJobs,
+} from './daily-digest.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -236,13 +239,75 @@ assert(pending.has('https://sg.jobstreet.com/job/111'), 'pending url captured');
 assert(!pending.has('https://sg.jobstreet.com/job/999'), 'Processed rows excluded');
 assert(parsePendingUrls('').size === 0, 'empty pipeline → empty set');
 
-const APPLIED_MD = `| Date | Company | Role | URL | Status |
-|---|---|---|---|---|
-| 2026-08-19 | Acme | Software Engineer | https://sg.jobstreet.com/job/111 | Applied |
+// The real tracker has NO URL column — its schema is
+// # | Date | Company | Role | Score | Status | PDF | Report | Notes
+// (merge-tracker.mjs LEGACY_COLMAP, AGENTS.md). The applied URL lives in the
+// Notes cell, put there by the daily-jobs playbook when it flips a row to
+// Applied. An earlier fixture invented a `| URL |` column, asserting on a shape
+// the file cannot have, which hid the fact that the exclusion never fired.
+const APPLIED_MD = `# Applications Tracker
+
+| # | Date | Company | Role | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|-------|--------|-----|--------|-------|
+| 12 | 2026-08-19 | Acme | Software Engineer | 4.2/5 | Applied | ✅ | [12](../reports/012-acme-2026-08-19.md) | Submitted 2026-08-19. https://sg.jobstreet.com/job/111 |
+| 13 | 2026-08-20 | Beta | Backend Engineer | 3.8/5 | Evaluated | ❌ | [13](../reports/013-beta-2026-08-20.md) | Considering. https://sg.jobstreet.com/job/222 |
 `;
 const applied = parseAppliedUrls(APPLIED_MD);
-assert(applied.has('https://sg.jobstreet.com/job/111'), 'applied url captured from the tracker table');
+assert(applied.has('https://sg.jobstreet.com/job/111'), 'url in the Notes of an Applied row is harvested');
+assert(!applied.has('https://sg.jobstreet.com/job/222'), 'url in the Notes of an Evaluated row is NOT harvested');
+assert(applied.size === 1, 'only applied rows contribute urls');
 assert(parseAppliedUrls('').size === 0, 'empty tracker → empty set');
+
+for (const later of ['Responded', 'Interview', 'Offer', 'Rejected']) {
+  assert(
+    parseAppliedUrls(APPLIED_MD.replace('| Applied |', `| ${later} |`)).has('https://sg.jobstreet.com/job/111'),
+    `a later-stage status counts as applied: ${later}`
+  );
+}
+for (const notYet of ['Evaluated', 'Discarded', 'SKIP']) {
+  assert(
+    parseAppliedUrls(APPLIED_MD.replace('| Applied |', `| ${notYet} |`)).size === 0,
+    `a pre-application status does NOT count as applied: ${notYet}`
+  );
+}
+
+// Column layout is located by header name, not a fixed index (mirroring
+// merge-tracker.mjs's detectColumns), so a customized tracker still works.
+const APPLIED_WITH_LOCATION = `| # | Date | Company | Role | Location | Score | Status | PDF | Report | Notes |
+|---|------|---------|------|----------|-------|--------|-----|--------|-------|
+| 12 | 2026-08-19 | Acme | Software Engineer | Singapore | 4.2/5 | Applied | ✅ | [12](../reports/x.md) | Submitted. https://sg.jobstreet.com/job/111 |
+| 13 | 2026-08-19 | Beta | Backend Engineer | Singapore | 3.8/5 | Evaluated | ❌ | [13](../reports/y.md) | https://sg.jobstreet.com/job/222 |
+`;
+const shifted = parseAppliedUrls(APPLIED_WITH_LOCATION);
+assert(shifted.has('https://sg.jobstreet.com/job/111'), 'an extra Location column does not break status detection');
+assert(!shifted.has('https://sg.jobstreet.com/job/222'), 'the Evaluated row stays excluded under a shifted layout');
+
+// No header row at all → fall back to the documented legacy column indices.
+const APPLIED_NO_HEADER = `| 12 | 2026-08-19 | Acme | Software Engineer | 4.2/5 | Applied | ✅ | [12](../reports/x.md) | https://sg.jobstreet.com/job/111 |
+`;
+assert(
+  parseAppliedUrls(APPLIED_NO_HEADER).has('https://sg.jobstreet.com/job/111'),
+  'headerless tracker falls back to the legacy column layout'
+);
+
+const rows = parseAppliedRows(APPLIED_MD);
+assert(rows.length === 1, 'parseAppliedRows returns only applied rows');
+assert(rows[0].company === 'Acme' && rows[0].role === 'Software Engineer', 'row carries company and role');
+assert(rows[0].date === '2026-08-19', 'row carries the tracker date');
+
+section('pickAppliedToday');
+
+const TODAY_ROWS = [
+  { date: '2026-08-20', company: 'Acme', role: 'Software Engineer', urls: ['https://x/1'] },
+  { date: '2026-08-19', company: 'Old', role: 'Backend Engineer', urls: ['https://x/2'] },
+  { date: '2026-08-20', company: 'NoLink', role: 'Data Engineer', urls: [] },
+];
+const today = pickAppliedToday(TODAY_ROWS, '2026-08-20');
+assert(today.length === 1, 'only rows dated today, and only those carrying a url');
+assert(today[0].company === 'Acme' && today[0].title === 'Software Engineer' && today[0].url === 'https://x/1',
+  'shaped as {company, title, url} for renderDigest');
+assert(pickAppliedToday([], '2026-08-20').length === 0, 'no rows → empty applied section');
+assert(pickAppliedToday(TODAY_ROWS, '2026-08-21').length === 0, 'a different date selects nothing');
 
 section('renderDigest');
 
@@ -273,6 +338,164 @@ assert(
   }).includes('<script>alert(1)</script>'),
   'escapes HTML in job fields'
 );
+
+section('scoreJob — fix round 4 (skill tokens match on word boundaries)');
+
+// A profile whose whole vocabulary is generic fragments — exactly the shape the
+// real config/profile.yml produces from narrative.superpowers ("across front
+// ends and back ends"). A raw substring match let "back" fire inside the single
+// word "backend", which SKILL_GENERIC explicitly excludes.
+const FRAGMENT_PROFILE = {
+  target_roles: { primary: ['Software Engineer'] },
+  narrative: { superpowers: ['root cause investigation across front ends and back ends'] },
+  compensation: { minimum: 'SGD6000' },
+};
+
+assert(
+  scoreJob(job({ title: 'Back End Engineer' }), FRAGMENT_PROFILE, NOW)
+  > scoreJob(job({ title: 'Backend Engineer' }), FRAGMENT_PROFILE, NOW),
+  'a fragment token ("back") matches as a standalone word but NOT inside "backend"'
+);
+assert(
+  scoreJob(job({ title: 'Backend Software Engineer (Java)' }), FRAGMENT_PROFILE, NOW)
+  === scoreJob(job({ title: 'Software Engineer (Java)' }), FRAGMENT_PROFILE, NOW),
+  'the word "backend" earns no skill credit at all from fragment tokens'
+);
+
+// Tokens shorter than 3 characters are dropped outright.
+const TINY_PROFILE = {
+  target_roles: { primary: ['Software Engineer'] },
+  narrative: { superpowers: ['ci cd as on'] },
+  compensation: { minimum: 'SGD6000' },
+};
+assert(
+  scoreJob(job({ title: 'Software Engineer (CI/CD, AS/400)' }), TINY_PROFILE, NOW)
+  === scoreJob(job({ title: 'Software Engineer' }), TINY_PROFILE, NOW),
+  'two-character tokens ("ci", "cd", "as", "on") award no skill marks'
+);
+
+// Boundary matching must still find the two symbol/suffix cases the original
+// design requires: ".net" inside "C#.Net" and "node" inside "NodeJS".
+const STACK_PROFILE = {
+  target_roles: { primary: ['Software Engineer'] },
+  narrative: { superpowers: ['C#/.NET and Node.js and Vue.js delivery'] },
+  compensation: { minimum: 'SGD6000' },
+};
+const stackBaseline = scoreJob(job({ title: 'Software Engineer' }), STACK_PROFILE, NOW);
+for (const title of [
+  'Software Engineer (C#.Net)',
+  'Senior .NET Developer, Software Engineer',
+  'Software Engineer, NodeJS',
+  'Software Engineer (Node.js)',
+  'Software Engineer, VueJS',
+]) {
+  assert(
+    scoreJob(job({ title }), STACK_PROFILE, NOW) > stackBaseline,
+    `boundary matching still credits the candidate's real stack: ${title}`
+  );
+}
+assert(
+  scoreJob(job({ title: 'Software Engineer, Sonnet' }), STACK_PROFILE, NOW) === stackBaseline,
+  '".net" does not match inside an unrelated word ("Sonnet")'
+);
+
+section('renderDigest — salary is displayed MONTHLY (annual ÷ 12)');
+
+const salaryHtml = renderDigest({
+  jobs: [{ ...job({ salary: { min: 84000, max: 96000, currency: 'SGD' } }), score: 50 }],
+  applied: [], failures: [], date: '2026-08-20',
+});
+assert(salaryHtml.includes('SGD 7,000 – 8,000/mo'), 'an 84k–96k annual range renders as SGD 7,000 – 8,000/mo');
+assert(!salaryHtml.includes('84,000') && !salaryHtml.includes('96,000'), 'the annual figures are never printed');
+
+const singleSalaryHtml = renderDigest({
+  jobs: [{ ...job({ salary: { min: 72000, max: 72000, currency: 'SGD' } }), score: 50 }],
+  applied: [], failures: [], date: '2026-08-20',
+});
+assert(singleSalaryHtml.includes('SGD 6,000/mo'), 'a single 72k annual value renders as one monthly figure, SGD 6,000/mo');
+assert(!singleSalaryHtml.includes('–'), 'a single value renders no range dash');
+
+section('collectJobs');
+
+const fakeCtx = { transport: 'test', fetchJson: async () => { throw new Error('no network in tests'); }, fetchText: async () => { throw new Error('no network in tests'); } };
+const passAll = () => true;
+const providerOf = (jobs) => ({ id: 'fake', detect: () => null, fetch: async () => jobs });
+
+const A = { title: 'Software Engineer', url: 'https://x/1', company: 'Acme', location: 'Singapore' };
+const B = { title: 'Backend Engineer', url: 'https://x/2', company: 'Beta', location: 'Singapore' };
+
+{
+  const { jobs, failures } = await collectJobs({
+    portals: { tracked_companies: [{ name: 'Fake', provider: 'fake' }] },
+    ctx: fakeCtx, pending: new Set(), applied: new Set(['https://x/1']),
+    titleOk: passAll, locationOk: passAll, salaryOk: passAll,
+    providers: { fake: providerOf([A, B]) },
+  });
+  assert(jobs.length === 1 && jobs[0].url === 'https://x/2', 'an applied url is excluded from the digest');
+  assert(failures.length === 0, 'no failures on a healthy source');
+}
+
+{
+  // End to end with the real tracker shape: the Applied row's url is excluded,
+  // the Evaluated row's url is not.
+  const { jobs } = await collectJobs({
+    portals: { tracked_companies: [{ name: 'Fake', provider: 'fake' }] },
+    ctx: fakeCtx, pending: new Set(),
+    applied: parseAppliedUrls(APPLIED_MD),
+    titleOk: passAll, locationOk: passAll, salaryOk: passAll,
+    providers: {
+      fake: providerOf([
+        { ...A, url: 'https://sg.jobstreet.com/job/111' },
+        { ...B, url: 'https://sg.jobstreet.com/job/222' },
+      ]),
+    },
+  });
+  assert(
+    jobs.length === 1 && jobs[0].url === 'https://sg.jobstreet.com/job/222',
+    'applied-exclusion is driven by the real tracker fixture: Applied dropped, Evaluated kept'
+  );
+}
+
+{
+  const { jobs, failures } = await collectJobs({
+    portals: {
+      tracked_companies: [
+        { name: 'Boom', provider: 'fake' },
+        { name: 'Mystery', provider: 'nope' },
+        { name: 'Good', provider: 'ok' },
+      ],
+    },
+    ctx: fakeCtx, pending: new Set(), applied: new Set(),
+    titleOk: passAll, locationOk: passAll, salaryOk: passAll,
+    providers: {
+      fake: { id: 'fake', detect: () => null, fetch: async () => { throw new Error('HTTP 429'); } },
+      ok: providerOf([A]),
+    },
+  });
+  assert(failures.some(f => f.includes('Boom') && f.includes('HTTP 429')), 'a throwing provider is named in failures');
+  assert(failures.some(f => f.includes('Mystery') && f.includes('unknown provider')), 'an unknown provider is named in failures');
+  assert(jobs.length === 1, 'one failing source does not lose the healthy source');
+}
+
+{
+  const { jobs } = await collectJobs({
+    portals: { tracked_companies: [{ name: 'Fake', provider: 'fake' }] },
+    ctx: fakeCtx, pending: new Set(['https://x/2']), applied: new Set(),
+    titleOk: passAll, locationOk: passAll, salaryOk: passAll,
+    providers: { fake: providerOf([A, B]) },
+  });
+  assert(jobs.length === 1 && jobs[0].url === 'https://x/2', 'a non-empty pipeline stays authoritative on what is new');
+}
+
+{
+  const { jobs } = await collectJobs({
+    portals: { tracked_companies: [{ name: 'Off', provider: 'fake', enabled: false }] },
+    ctx: fakeCtx, pending: new Set(), applied: new Set(),
+    titleOk: passAll, locationOk: passAll, salaryOk: passAll,
+    providers: { fake: providerOf([A, B]) },
+  });
+  assert(jobs.length === 0, 'a disabled entry is skipped');
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

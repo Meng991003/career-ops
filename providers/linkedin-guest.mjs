@@ -131,7 +131,12 @@ export default {
 
       let html;
       try {
-        html = await ctx.fetchText(url.href);
+        // `redirect: 'error'` matches providers/jobstreet.mjs. Without it,
+        // LinkedIn's typical guest rate-limit response — a 302 to /authwall,
+        // which itself returns HTTP 200 — is followed silently. That page has
+        // no card markers, so the guard below did not trip either: the whole
+        // source vanished from the digest with no entry in `failures`.
+        html = await ctx.fetchText(url.href, { redirect: 'error' });
       } catch (err) {
         // Page 1 failing is fatal for this entry; scan.mjs logs and moves on.
         // Later pages failing is non-fatal — keep what we have.
@@ -146,6 +151,15 @@ export default {
         // If HTML contains card markers but we parsed 0 cards, the endpoint markup likely changed.
         if (html.includes('base-search-card')) {
           throw new Error('linkedin-guest: fetched HTML contains card markers but 0 cards parsed — the guest endpoint markup likely changed');
+        }
+        // The FIRST page returning nothing is a failure, not an empty market:
+        // a Singapore "software engineer" search never legitimately returns
+        // zero results, so this is an authwall body, a rate limit, or a shape
+        // change. Throwing puts the source in the digest's `failures` list
+        // instead of silently dropping ~80 candidates. A later page returning
+        // zero is the normal end of results and still just breaks.
+        if (page === 0) {
+          throw new Error('linkedin-guest: first page returned 0 job cards and no card markers — likely an authwall page or rate limit, not an empty result set');
         }
         break;
       }

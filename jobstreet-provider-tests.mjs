@@ -9,7 +9,7 @@
  * the job URL must be built from `id`.
  */
 
-import { parseJobstreetItem, parseSalaryLabel } from './providers/jobstreet.mjs';
+import jobstreet, { parseJobstreetItem, parseSalaryLabel } from './providers/jobstreet.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -163,6 +163,44 @@ assert(parseSalaryLabel('$4,000 - $5,000 per month + $1,500 transport allowance'
 assert(parseSalaryLabel('$3,000 – $4,000 per month + $1,200 allowance') === null, '3 currency figures → null (too complex)');
 assert(parseSalaryLabel('$4,000 per month + $1,200 allowance') === null, '2 figures NOT forming a range → null');
 assert(parseSalaryLabel('$6,000 per month + $1,500 relocation') === null, '2 figures NOT forming a range → null');
+
+section('fetch — salary is attached to the job (ctx injected, no network)');
+
+// The `fetch` loop is where a parsed salary becomes part of the emitted job.
+// Both halves were covered in isolation; this covers the join.
+function fakeCtx(pages) {
+  const calls = [];
+  return {
+    calls,
+    transport: 'test',
+    fetchText: async () => { throw new Error('jobstreet must not use fetchText'); },
+    fetchJson: async (url, opts) => {
+      calls.push({ url, opts });
+      const body = pages[calls.length - 1];
+      if (body === undefined) throw new Error('unexpected extra page fetch');
+      return body;
+    },
+  };
+}
+
+const UNPRICED_ITEM = { ...REAL_ITEM, id: '94049728', title: 'Backend Engineer', salaryLabel: 'World Class Benefits' };
+
+{
+  const ctx = fakeCtx([{ data: [REAL_ITEM, UNPRICED_ITEM] }]);
+  const jobs = await jobstreet.fetch({ name: 'JobStreet SG', pageSize: 30 }, ctx);
+  assert(jobs.length === 2, 'both a priced and an unpriced item are returned — neither is dropped');
+
+  const priced = jobs.find(j => j.url.endsWith('/94049727'));
+  assert(
+    JSON.stringify(priced?.salary) === JSON.stringify({ min: 48000, max: 72000, currency: 'SGD' }),
+    'a priced item carries an ANNUALIZED salary ($4,000–$6,000 per month x12)'
+  );
+
+  const unpriced = jobs.find(j => j.url.endsWith('/94049728'));
+  assert(unpriced !== undefined, 'an unparseable salaryLabel does not drop the job');
+  assert(!('salary' in (unpriced || {})), 'an unpriced job is pushed WITHOUT a salary key at all');
+  assert(ctx.calls[0].opts?.redirect === 'error', 'fetchJson is called with redirect: error');
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

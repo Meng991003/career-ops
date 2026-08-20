@@ -9,7 +9,7 @@
  * 2026-08-20). The endpoint returns HTML, not JSON.
  */
 
-import { parseLinkedInCards } from './providers/linkedin-guest.mjs';
+import linkedinGuest, { parseLinkedInCards } from './providers/linkedin-guest.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -99,6 +99,81 @@ section('parseLinkedInCards — malformed vs empty');
 const BROKEN_MARKUP = '<div class="base-search-card">Not a real card</div>';
 const broken = parseLinkedInCards(BROKEN_MARKUP);
 assert(broken.length === 0, 'HTML with base-search-card but no card structure returns empty array');
+
+section('fetch — ctx is injected, so no network is touched');
+
+// One fake ctx per test: `pages` is the response for each successive request.
+function fakeCtx(pages) {
+  const calls = [];
+  return {
+    calls,
+    transport: 'test',
+    fetchJson: async () => { throw new Error('linkedin-guest must not use fetchJson'); },
+    fetchText: async (url, opts) => {
+      calls.push({ url, opts });
+      const body = pages[calls.length - 1];
+      if (body === undefined) throw new Error('unexpected extra page fetch');
+      return body;
+    },
+  };
+}
+
+const FULL_PAGE = CARD.repeat(10); // RESULTS_PER_PAGE — provider will ask for another
+// LinkedIn's guest rate-limit response: a 302 to /authwall that itself returns
+// HTTP 200. No card markers, so the marker-based guard cannot see it.
+const AUTHWALL = '<html><body><h1>Join LinkedIn</h1><p>Sign in to continue</p></body></html>';
+
+async function expectThrow(ctx, entry, name) {
+  try {
+    await linkedinGuest.fetch(entry, ctx);
+    assert(false, name);
+  } catch {
+    assert(true, name);
+  }
+}
+
+{
+  const ctx = fakeCtx([FULL_PAGE, '']);
+  const jobs = await linkedinGuest.fetch({ searchKeywords: 'software engineer' }, ctx);
+  assert(jobs.length === 10, 'a full first page followed by an empty page returns the first page');
+  assert(ctx.calls.length === 2, 'a genuinely empty later page ends the loop without throwing');
+  assert(ctx.calls[0].opts?.redirect === 'error', 'fetchText is called with redirect: error (no silent authwall follow)');
+}
+
+await expectThrow(
+  fakeCtx(['<ul><li class="base-search-card">Not a real card</li></ul>']),
+  { searchKeywords: 'software engineer' },
+  'page 1 with card markers but 0 parseable cards throws (markup changed)'
+);
+
+await expectThrow(
+  fakeCtx([AUTHWALL]),
+  { searchKeywords: 'software engineer' },
+  'page 1 returning 0 cards and no markers throws — an authwall/rate-limit page is never a quiet market'
+);
+
+await expectThrow(
+  fakeCtx(['']),
+  { searchKeywords: 'software engineer' },
+  'page 1 returning an empty body throws rather than yielding an empty source'
+);
+
+{
+  const ctx = fakeCtx([FULL_PAGE, FULL_PAGE, FULL_PAGE, FULL_PAGE]);
+  const jobs = await linkedinGuest.fetch({ maxPages: 2 }, ctx);
+  assert(ctx.calls.length === 2, 'the maxPages cap is respected (2 pages requested, 2 fetched)');
+  assert(jobs.length === 20, 'both capped pages are returned');
+  assert(
+    new URL(ctx.calls[1].url).searchParams.get('start') === '10',
+    'pagination advances by RESULTS_PER_PAGE'
+  );
+}
+
+{
+  const ctx = fakeCtx([FULL_PAGE, AUTHWALL]);
+  const jobs = await linkedinGuest.fetch({ maxPages: 3 }, ctx);
+  assert(jobs.length === 10, 'a later page going bad keeps what was already collected');
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

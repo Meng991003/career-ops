@@ -6,9 +6,20 @@ user_invocable: true
 
 # Daily Jobs — Singapore Routine
 
-Read `modes/_shared.md` and `modes/_profile.md` FIRST. They carry the scoring
-rules, sources of truth, and the `voice-dna.md` anti-slop guardrail that all
-candidate-facing text must obey.
+Read `modes/_shared.md` FIRST, then `modes/_profile.md` **if it exists** (every
+upstream mode guards it the same way). They carry the scoring rules, sources of
+truth, and the `voice-dna.md` anti-slop guardrail that all candidate-facing text
+must obey.
+
+**If `modes/_profile.md` is missing, say so once, then continue.** Only
+`modes/_profile.template.md` ships with career-ops; `node doctor.mjs` reports
+the absent file as an error. Until the candidate creates it —
+`cp modes/_profile.template.md modes/_profile.md`, then fill it in with their own
+archetypes, narrative, proof points and voice rules — the archetype and narrative
+guidance this routine would otherwise inherit is simply absent, so evaluations
+will be blunter and generated CVs, letters and form answers noticeably more
+generic. Never write that file for them: it is the candidate's personal content
+and inventing it would fabricate résumé facts (rule 4).
 
 Run everything from the career-ops project root.
 
@@ -117,14 +128,36 @@ Only after gate 1 passes.
    - `scope: per-job` → draft fresh from this job's report. Never reuse a stale
      per-job answer. Apply `voice-dna.md`.
    - **No match** → ask the candidate. Then persist it so it is never asked
-     again. Compute today's date using the candidate's timezone (same as the
-     digest filename):
+     again. Which of the two forms below you use depends on whether the answer
+     is job-independent. Both compute today's date using the candidate's
+     timezone (same as the digest filename).
+
+     **(a) Job-independent answer** (notice period, visa status, years of
+     experience) → store the answer with `scope: universal`. It will be filled
+     verbatim, at every future employer:
      ```bash
-     node -e "Promise.all([import('./daily-digest.mjs'),import('js-yaml')]).then(async([d,y])=>{const {readFileSync}=await import('fs');console.log(d.digestDate(y.default.load(readFileSync('config/profile.yml','utf8'))))})" | xargs -I{} node -e "import('./answers.mjs').then(m=>m.appendAnswer({q:process.argv[1],match:JSON.parse(process.argv[2]),scope:process.argv[3],a:process.argv[4],updated:process.argv[5]}))" "<q>" '["token1","token2"]' universal "<answer>" "{}"
+     node -e "Promise.all([import('./daily-digest.mjs'),import('js-yaml')]).then(async([d,y])=>{const {readFileSync}=await import('fs');console.log(d.digestDate(y.default.load(readFileSync('config/profile.yml','utf8'))))})" | xargs -I{} node -e "import('./answers.mjs').then(m=>m.appendAnswer({q:process.argv[1],match:JSON.parse(process.argv[2]),scope:'universal',a:process.argv[3],updated:process.argv[4]}))" "<q>" '["token1","token2"]' "<answer>" "{}"
      ```
+
+     **(b) Employer-specific question** ("Why do you want to join us?", "Which
+     of our products…?") → store the **QUESTION ONLY**, with `scope: per-job`
+     and **no `a` field at all**. The store then remembers that the question
+     exists and how to recognise it, and the answer is drafted fresh from that
+     job's report every single time:
+     ```bash
+     node -e "Promise.all([import('./daily-digest.mjs'),import('js-yaml')]).then(async([d,y])=>{const {readFileSync}=await import('fs');console.log(d.digestDate(y.default.load(readFileSync('config/profile.yml','utf8'))))})" | xargs -I{} node -e "import('./answers.mjs').then(m=>m.appendAnswer({q:process.argv[1],match:JSON.parse(process.argv[2]),scope:'per-job',updated:process.argv[3]}))" "<q>" '["token1","token2"]' "{}"
+     ```
+     Form (a) with `scope: per-job` would throw — `answers.mjs` rejects a
+     per-job entry that carries an `a`. That rejection is deliberate, and form
+     (b) is the way to satisfy it, not a workaround.
+
+     **NEVER store an employer-specific answer as `universal`.** A universal
+     entry is auto-filled verbatim, so "I want to join Acme because…" would be
+     typed into the next company's form — visibly wrong to the reader, and the
+     kind of error that ends an application.
+
      Choose `match` tokens that are specific enough not to collide with an
-     existing entry. Prefer `universal` only when the answer is genuinely
-     job-independent.
+     existing entry.
 5. Fill the fields. State which `answers.yml` entry matched each one, so a
    wrong match is visible rather than silent.
 
@@ -137,32 +170,53 @@ Only after gate 1 passes.
 
 ### Step 7 — Record and report
 
-After a confirmed submission:
+After a confirmed submission, mark the row the Step 3 evaluation already wrote.
 
-1. Reserve a report number:
-   ```bash
-   node reserve-report-num.mjs
-   ```
-2. Write a single-line TSV to `batch/tracker-additions/{num}-{company-slug}.tsv`
-   with these 9 tab-separated columns (in order):
-   ```
-   {num}	{date}	{company}	{role}	Applied	{score}/5	{pdf_emoji}	[{num}](reports/{num}-{slug}-{date}.md)	{note}
-   ```
-   - `date` is YYYY-MM-DD
-   - `score` is the A-F evaluation score formatted `X.X/5`
-   - `pdf_emoji` is ✅ or ❌
-   - Report link is always root-relative `[num](reports/...)`; merge-tracker.mjs rewrites it
-   - Use the existing company+role if it already exists in applications.md — update it rather than duplicating
-3. Merge into the tracker:
-   ```bash
-   node merge-tracker.mjs
-   ```
-4. Regenerate the digest so it reflects the submission:
-   ```bash
-   node daily-digest.mjs
-   ```
-5. Give the candidate the digest path and a one-line summary of what was
-   submitted.
+**Do NOT reserve a report number. Do NOT write a TSV. Do NOT run
+`merge-tracker.mjs`.** Step 3's evaluation (`modes/oferta.md`) already reserved,
+used and released a report number and already merged a tracker row for this
+company and role, with status `Evaluated` and the A–F score. A second report
+number would point at a file that does not exist, and `merge-tracker.mjs` cannot
+change a status at all: it only rewrites an existing row when the new score is
+*higher*, and even then it re-uses the old row's status
+(`status: duplicate.status`). A TSV saying `Applied` would be silently skipped —
+your application would go unrecorded with no error.
+
+Recording is therefore an in-place **update**:
+
+1. Find the existing row for this company + role in `data/applications.md` — the
+   one the Step 3 evaluation wrote. Match on company and role.
+2. Edit exactly two cells of that row:
+   - **Status** → `Applied` (canonical, no bold, no date, no extra text).
+   - **Notes** → append the submission date and the job URL, e.g.
+     `Applied 2026-08-21. https://sg.jobstreet.com/job/94049727`, keeping
+     whatever the notes already said.
+   The URL in Notes is not decoration: `daily-digest.mjs` reads applied URLs out
+   of the Notes cell of applied rows. Omit it and the role reappears at the top
+   of tomorrow's digest under a heading that says you have not applied to it.
+3. Preserve **every** other cell byte-for-byte — number, date, company, role,
+   score, PDF flag, and the existing report link. The tracker's column order is
+   `# | Date | Company | Role | Score | Status | PDF | Report | Notes`.
+4. **Never add a new row here.** `CLAUDE.md` rule 1 is absolute: *"NEVER edit
+   applications.md to ADD new entries"* — additions go through a TSV and
+   `merge-tracker.mjs`. This step is permitted only because rule 2 says
+   *"YES you can edit applications.md to UPDATE status/notes of existing
+   entries"*, and `Evaluated` → `Applied` is precisely that update.
+5. If **no** matching row exists (the Step 3 evaluation was skipped, or the
+   company/role differ from what was evaluated), **stop and tell the candidate**
+   what you could not find. Do not invent a row, and do not fall back to writing
+   a TSV. The application is already submitted; the honest fix is for the
+   candidate to decide whether to run the evaluation now or record it by hand.
+
+Then regenerate the digest so it reflects the submission — the applied role
+drops out of the list and appears in the "Applied today" section:
+
+```bash
+node daily-digest.mjs
+```
+
+Finally, give the candidate the digest path and a one-line summary of what was
+submitted.
 
 ## When something goes wrong
 
@@ -176,3 +230,5 @@ After a confirmed submission:
 | Company/role mismatch | Stop before drafting; ask how to proceed |
 | Form question you cannot answer | Ask. Never guess on a real application |
 | `answers.yml` fails to load | Stop. Report the error. Never proceed with an empty store — that would blank out real answers |
+| No tracker row to update in Step 7 | Stop and say so. Never add a row and never write a TSV (see Step 7) |
+| Digest shorter after regenerating | `node daily-digest.mjs` re-fetches every portal entry, so a mid-cycle rate limit can replace the morning's list with a shorter one. Check the failures box before reading it as a quiet market; the morning file is gone once overwritten |

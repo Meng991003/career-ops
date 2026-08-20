@@ -72,16 +72,108 @@ export function parsePendingUrls(text) {
   return urls;
 }
 
+// Fix round 4 (C2): the tracker has NO URL column — its schema is
+// # | Date | Company | Role | Score | Status | PDF | Report | Notes
+// (merge-tracker.mjs:430 LEGACY_COLMAP, AGENTS.md:119). A row's only link is a
+// relative markdown report link, so scraping http(s) URLs out of the whole file
+// always yielded an empty set and the digest's applied-exclusion was a
+// permanent no-op. The applied URL now lives in the Notes cell, written there
+// by the daily-jobs playbook when it flips a row to Applied.
+//
+// Rows are therefore read PER ROW, and only rows whose status means the
+// candidate actually submitted contribute URLs — a URL sitting in the Notes of
+// an `Evaluated` row must not make an evaluated-but-not-applied role vanish
+// from the digest.
+
+// Canonical statuses per templates/states.yml / normalize-statuses.mjs:
+// Evaluated · Applied · Responded · Interview · Offer · Rejected · Discarded · SKIP.
+// Everything from Applied onward implies a submitted application; Evaluated,
+// Discarded and SKIP are all pre-application states.
+const APPLIED_STATUSES = new Set(['applied', 'responded', 'interview', 'offer', 'rejected']);
+
+// Header name → logical column, mirroring merge-tracker.mjs's HEADER_ALIASES so
+// a customized layout (e.g. an extra Location column after Role) is read by
+// header NAME rather than a fixed index.
+const TRACKER_HEADERS = {
+  '#': 'num', 'num': 'num', 'date': 'date', 'company': 'company', 'empresa': 'company',
+  'role': 'role', 'puesto': 'role', 'status': 'status', 'notes': 'notes',
+};
+
+// Fallback when no recognizable header row exists — the documented default
+// layout, same indices as merge-tracker.mjs's LEGACY_COLMAP (index 0 is the
+// empty cell before the first pipe).
+const LEGACY_TRACKER_COLS = { num: 1, date: 2, company: 3, role: 4, status: 6, notes: 9 };
+
 /**
- * URLs already in the application tracker, in any markdown-table column.
+ * Locate the tracker's columns from its header row. Returns null (caller keeps
+ * the legacy layout) unless company, role and status are all present, so a
+ * stray pipe line cannot yield a bogus mapping.
+ * @param {string[]} lines
+ */
+function detectTrackerCols(lines) {
+  for (const line of lines) {
+    if (!line.startsWith('|')) continue;
+    const cells = line.split('|').map(s => s.trim().toLowerCase());
+    if (!cells.includes('company') || !cells.includes('role')) continue;
+    const map = {};
+    cells.forEach((c, i) => { if (TRACKER_HEADERS[c] != null) map[TRACKER_HEADERS[c]] = i; });
+    if (['company', 'role', 'status'].every(k => map[k] != null)) return map;
+  }
+  return null;
+}
+
+/**
+ * Rows of the application tracker the candidate has actually applied to.
+ * @param {string} text — contents of data/applications.md
+ * @returns {Array<{date: string, company: string, role: string, status: string, urls: string[]}>}
+ */
+export function parseAppliedRows(text) {
+  const rows = [];
+  if (typeof text !== 'string' || !text) return rows;
+
+  const lines = text.split('\n');
+  const cols = detectTrackerCols(lines) || LEGACY_TRACKER_COLS;
+
+  for (const line of lines) {
+    if (!line.startsWith('|')) continue;
+    if (line.includes('---')) continue; // separator row
+    const parts = line.split('|').map(s => s.trim());
+    const status = String(parts[cols.status] || '').replace(/\*\*/g, '').trim().toLowerCase();
+    if (!APPLIED_STATUSES.has(status)) continue; // also skips the header row
+    rows.push({
+      date: parts[cols.date] || '',
+      company: parts[cols.company] || '',
+      role: parts[cols.role] || '',
+      status,
+      urls: [...line.matchAll(/https?:\/\/[^\s|)\]]+/g)].map(m => m[0].trim()),
+    });
+  }
+  return rows;
+}
+
+/**
+ * URLs from tracker rows the candidate has applied to. Rows in a pre-application
+ * status (Evaluated, Discarded, SKIP) never contribute.
  * @param {string} text
  * @returns {Set<string>}
  */
 export function parseAppliedUrls(text) {
   const urls = new Set();
-  if (typeof text !== 'string' || !text) return urls;
-  for (const m of text.matchAll(/https?:\/\/[^\s|)\]]+/g)) urls.add(m[0].trim());
+  for (const row of parseAppliedRows(text)) for (const u of row.urls) urls.add(u);
   return urls;
+}
+
+/**
+ * Applications submitted on `date`, shaped for renderDigest's applied section.
+ * A row with no URL in its Notes cell cannot be linked, so it is skipped.
+ * @param {Array<{date: string, company: string, role: string, urls: string[]}>} rows
+ * @param {string} date — YYYY-MM-DD, from digestDate (candidate's timezone)
+ * @returns {Array<{company: string, title: string, url: string}>}
+ */
+export function pickAppliedToday(rows, date) {
+  return (rows || [])
+    .filter(r => r.date === date && r.urls.length > 0)
+    .map(r => ({ company: r.company, title: r.role, url: r.urls[0] }));
 }
 
 // ── Triage scoring ─────────────────────────────────────────────────
@@ -133,6 +225,11 @@ const FOREIGN_STACK_PATTERNS = FOREIGN_STACK.map(
   tok => new RegExp(`(?<![a-z0-9])${escapeRegex(tok)}s?(?![a-z0-9])`)
 );
 
+// Minimum skill-token length. Fix round 4 (I3): tokenizing the real
+// config/profile.yml yields two-character fragments ("as", "on", "ci", "cd")
+// that carry no stack signal at all.
+const SKILL_MIN_LEN = 3;
+
 /**
  * Candidate's concrete technology vocabulary, tokenized from profile.yml
  * (archetype names + narrative.superpowers), lowercased, generic words
@@ -157,13 +254,40 @@ function skillTokens(profile) {
   for (const src of sources) {
     for (const raw of String(src).toLowerCase().split(/[\s/+(),;-]+/)) {
       const w = raw.trim();
-      if (!w || SKILL_GENERIC.has(w)) continue;
+      if (!w || SKILL_GENERIC.has(w) || w.length < SKILL_MIN_LEN) continue;
       tokens.add(w);
       const dot = w.indexOf('.', 1); // internal dot, not a leading one like ".net"
-      if (dot > 0) tokens.add(w.slice(0, dot));
+      if (dot > 0 && dot >= SKILL_MIN_LEN) tokens.add(w.slice(0, dot));
     }
   }
   return tokens;
+}
+
+/**
+ * Skill tokens as WORD-BOUNDARY patterns.
+ *
+ * Fix round 4 (I3): `scoreJob` matched with raw `lowerTitle.includes(tok)`, so
+ * fragments defeated SKILL_GENERIC — "back" and "end" both fire inside the
+ * single word "backend", which SKILL_GENERIC explicitly excludes, and the skill
+ * term saturates at 3 hits, so any "Backend … Engineer" title collected the
+ * full 40 points regardless of stack. Measured on the real pipeline: 27 of 481
+ * titles reached full skill marks on junk tokens alone before this change, 0
+ * after. This reuses the same escape +
+ * lookaround construction as FOREIGN_STACK_PATTERNS, for the same reason: a
+ * plain `\b` cannot handle symbol-bearing tokens like ".net" or "c#".
+ *
+ * The optional `(?:\.?js)?` suffix is deliberate, not incidental: the original
+ * design requires `.net` to match inside "C#.Net" (it does — the character
+ * before the dot is "#", not alphanumeric) and `node` to match inside "NodeJS",
+ * which a pure boundary rule would reject. Allowing the JS suffix keeps
+ * "NodeJS"/"Node.js"/"VueJS" matching without reintroducing substring matching.
+ * @param {any} profile
+ * @returns {RegExp[]}
+ */
+function skillPatterns(profile) {
+  return [...skillTokens(profile)].map(
+    tok => new RegExp(`(?<![a-z0-9])${escapeRegex(tok)}(?:\\.?js)?(?![a-z0-9])`)
+  );
 }
 
 /**
@@ -202,10 +326,9 @@ export function scoreJob(job, profile, now = Date.now()) {
 
   // 2. Skill match (max 40): this is what actually breaks the tie between
   // same-shaped titles, e.g. "Software Engineer (C/C++)" vs "...C#.NET".
-  const vocab = skillTokens(profile);
   let skillHits = 0;
-  for (const tok of vocab) {
-    if (lowerTitle.includes(tok)) skillHits++;
+  for (const re of skillPatterns(profile)) {
+    if (re.test(lowerTitle)) skillHits++;
   }
   const skillScore = 40 * Math.min(1, skillHits / 3);
 
@@ -391,32 +514,31 @@ export function digestDate(profile, now = new Date()) {
   return now.toLocaleDateString('en-CA', { timeZone: tz });
 }
 
-// ── CLI ────────────────────────────────────────────────────────────
+// ── Collection ─────────────────────────────────────────────────────
 
-async function main() {
-  const profile = yaml.load(readFileSync(PROFILE_PATH, 'utf-8')) || {};
-  const portals = yaml.load(readFileSync(PORTALS_PATH, 'utf-8')) || {};
-
-  const pending = existsSync(PIPELINE_PATH)
-    ? parsePendingUrls(readFileSync(PIPELINE_PATH, 'utf-8')) : new Set();
-  const applied = existsSync(APPLIED_PATH)
-    ? parseAppliedUrls(readFileSync(APPLIED_PATH, 'utf-8')) : new Set();
-
-  const ctx = makeHttpCtx();
-  // Reuse all three of scan.mjs's filters. The pipeline.md intersection below
-  // already implies them for scanned jobs, but on a first run (empty pipeline)
-  // we fall through and show everything — without these, that path would be
-  // unfiltered and could surface internships or non-SG roles.
-  const salaryOk = buildSalaryFilter(portals.salary_filter);
-  const titleOk = buildTitleFilter(portals.title_filter);
-  const locationOk = buildLocationFilter(portals.location_filter);
+/**
+ * Fetch every enabled portal entry and keep the jobs that clear the filters.
+ * Extracted from main() so the composition — applied-exclusion, pipeline
+ * intersection, failure collection — is testable with an injected ctx and
+ * provider map, without a network call.
+ *
+ * @param {{
+ *   portals: any, ctx: any, pending: Set<string>, applied: Set<string>,
+ *   titleOk: (t: any) => boolean, locationOk: (l: any) => boolean,
+ *   salaryOk: (s: any) => boolean, providers?: Record<string, any>,
+ * }} args
+ * @returns {Promise<{jobs: Array<any>, failures: string[]}>}
+ */
+export async function collectJobs({
+  portals, ctx, pending, applied, titleOk, locationOk, salaryOk, providers = PROVIDERS,
+}) {
   const failures = [];
   const seen = new Set();
-  const collected = [];
+  const jobs = [];
 
-  for (const entry of portals.tracked_companies || []) {
+  for (const entry of portals?.tracked_companies || []) {
     if (entry.enabled === false) continue;
-    const provider = PROVIDERS[entry.provider];
+    const provider = providers[entry.provider];
     if (!provider) {
       failures.push(`${entry.name}: unknown provider "${entry.provider}"`);
       continue;
@@ -432,17 +554,48 @@ async function main() {
         if (!locationOk(job.location)) continue;
         if (!salaryOk(job.salary)) continue;
         seen.add(job.url);
-        collected.push(job);
+        jobs.push(job);
       }
     } catch (err) {
       failures.push(`${entry.name} (${entry.provider}): ${err.message}`);
     }
   }
 
+  return { jobs, failures };
+}
+
+// ── CLI ────────────────────────────────────────────────────────────
+
+async function main() {
+  const profile = yaml.load(readFileSync(PROFILE_PATH, 'utf-8')) || {};
+  const portals = yaml.load(readFileSync(PORTALS_PATH, 'utf-8')) || {};
+
+  const pending = existsSync(PIPELINE_PATH)
+    ? parsePendingUrls(readFileSync(PIPELINE_PATH, 'utf-8')) : new Set();
+  // Applied rows serve two purposes: their URLs exclude a job from today's list
+  // (C2), and the ones dated today fill the digest's "Applied today" section so
+  // the file doubles as the post-application report (spec, Delta 5).
+  const appliedRows = existsSync(APPLIED_PATH)
+    ? parseAppliedRows(readFileSync(APPLIED_PATH, 'utf-8')) : [];
+  const applied = new Set(appliedRows.flatMap(r => r.urls));
+
+  const ctx = makeHttpCtx();
+  // Reuse all three of scan.mjs's filters. The pipeline.md intersection in
+  // collectJobs already implies them for scanned jobs, but on a first run
+  // (empty pipeline) we fall through and show everything — without these, that
+  // path would be unfiltered and could surface internships or non-SG roles.
+  const salaryOk = buildSalaryFilter(portals.salary_filter);
+  const titleOk = buildTitleFilter(portals.title_filter);
+  const locationOk = buildLocationFilter(portals.location_filter);
+
+  const { jobs: collected, failures } = await collectJobs({
+    portals, ctx, pending, applied, titleOk, locationOk, salaryOk,
+  });
+
   const date = digestDate(profile);
   const html = renderDigest({
     jobs: rankJobs(collected, profile, TOP_N),
-    applied: [],
+    applied: pickAppliedToday(appliedRows, date),
     failures,
     date,
   });
