@@ -61,9 +61,13 @@ entirely for ONE job — including both approval gates and submission — before
 moving to the next job. Gates are never batched across jobs. Approval for one
 job never carries to another.
 
+Work through the candidate's picks one at a time. The entire 3-7 cycle repeats
+from the top for each pick only after the current one has been submitted or
+abandoned.
+
 ### Step 3 — Evaluate and verify
 
-For each picked role, in order:
+For the role currently in this cycle:
 
 1. Run the career-ops evaluation (`modes/oferta.md` via the `career-ops` skill,
    or `auto-pipeline` from the URL) for the A–F score and the Block G
