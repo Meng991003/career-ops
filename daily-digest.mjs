@@ -42,10 +42,12 @@ const PROFILE_PATH = 'config/profile.yml';
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
 const PIPELINE_PATH = 'data/pipeline.md';
 const APPLIED_PATH = 'data/applications.md';
+const BENCHMARKS_PATH = 'config/salary-benchmarks.yml';
 const OUTPUT_DIR = 'output';
 const TOP_N = 10;
 
 const PROVIDERS = { jobstreet, 'linkedin-guest': linkedinGuest };
+const SOURCE_LABELS = { jobstreet: 'JobStreet', 'linkedin-guest': 'LinkedIn' };
 
 // ── Parsing the scan's durable files ────────────────────────────────
 
@@ -193,6 +195,120 @@ export function pickAppliedToday(rows, date) {
     .map(r => ({ company: r.company, title: r.role, url: r.urls[0] }));
 }
 
+// ── Salary benchmarks (imputation for unpriced postings) ────────────
+//
+// config/salary-benchmarks.yml is a reference file, not code — see its header
+// comment for the full rationale. It is optional: if absent, everything below
+// degrades to today's behaviour (no imputation, salaryScore stays 10). If
+// present but malformed, we throw rather than silently score against garbage
+// — same reasoning as answers.mjs's loadAnswers.
+
+/**
+ * Load and validate the salary benchmarks reference.
+ * @param {string} [path]
+ * @returns {any|null} null when the file is absent (degraded mode, not an error)
+ */
+export function loadBenchmarks(path = BENCHMARKS_PATH) {
+  if (!existsSync(path)) return null;
+
+  const raw = readFileSync(path, 'utf-8');
+  let parsed;
+  try {
+    parsed = yaml.load(raw);
+  } catch (err) {
+    throw new Error(`${path}: malformed YAML — ${err.message}`);
+  }
+
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${path}: top level must be a mapping`);
+  }
+  if (!Array.isArray(parsed.buckets) || parsed.buckets.length === 0) {
+    throw new Error(`${path}: \`buckets\` must be a non-empty list`);
+  }
+  for (const bucket of parsed.buckets) {
+    if (!bucket || typeof bucket.key !== 'string' || !Number.isFinite(bucket.low) || !Number.isFinite(bucket.high)) {
+      throw new Error(`${path}: each bucket needs a string \`key\` and numeric \`low\`/\`high\``);
+    }
+  }
+  if (!parsed.default || !Number.isFinite(parsed.default.low) || !Number.isFinite(parsed.default.high)) {
+    throw new Error(`${path}: \`default\` must have numeric \`low\`/\`high\``);
+  }
+  if (!parsed.classify || typeof parsed.classify.bands !== 'object' || typeof parsed.classify.families !== 'object') {
+    throw new Error(`${path}: \`classify.bands\` and \`classify.families\` are required`);
+  }
+
+  return parsed;
+}
+
+/**
+ * Classify a title into a benchmark band/family. Patterns are matched
+ * case-insensitively; unmatched falls to band "mid" / family "general".
+ *
+ * The haystack is padded with a leading/trailing space so a family pattern
+ * written with surrounding spaces (" ml ", " ai ") can still match a title
+ * that starts or ends with that word, without ever degrading to a bare
+ * substring match — that's what stops "email"/"mailing" from classifying as
+ * "data" via the " ai " pattern.
+ *
+ * @param {string} title
+ * @param {any} benchmarks — result of loadBenchmarks(), or null
+ * @returns {{band: string, family: string}}
+ */
+export function classifyTitle(title, benchmarks) {
+  const haystack = ` ${String(title || '').toLowerCase()} `;
+  const bands = benchmarks?.classify?.bands || {};
+  const families = benchmarks?.classify?.families || {};
+
+  let band = 'mid';
+  for (const [name, patterns] of Object.entries(bands)) {
+    if ((patterns || []).some(p => haystack.includes(String(p).toLowerCase()))) { band = name; break; }
+  }
+
+  let family = 'general';
+  for (const [name, patterns] of Object.entries(families)) {
+    if ((patterns || []).some(p => haystack.includes(String(p).toLowerCase()))) { family = name; break; }
+  }
+
+  return { band, family };
+}
+
+/**
+ * Resolve a title to its benchmark bucket: exact "<band>/<family>", then
+ * "<band>/*", then the global default. The returned object carries its own
+ * `key` (the default's key is stamped 'default', since the YAML default has
+ * none) so the caller knows which one matched.
+ * @param {string} title
+ * @param {any} benchmarks
+ * @returns {any|null} null when benchmarks is null
+ */
+export function lookupBucket(title, benchmarks) {
+  if (!benchmarks) return null;
+  const { band, family } = classifyTitle(title, benchmarks);
+  const buckets = benchmarks.buckets || [];
+  const exact = buckets.find(b => b.key === `${band}/${family}`);
+  if (exact) return exact;
+  const wild = buckets.find(b => b.key === `${band}/*`);
+  if (wild) return wild;
+  return { ...benchmarks.default, key: 'default' };
+}
+
+/**
+ * Estimate a monthly SGD salary range for a job with no posted salary, from
+ * its title's benchmark bucket. Never called for a job that already has a
+ * posted salary — that figure always wins. This feeds the triage score AND
+ * is attached to the ranked job (see rankJobs) so the digest can render it
+ * clearly labelled as a guess, never as if it were posted.
+ * @param {any} job
+ * @param {any} benchmarks
+ * @returns {{low: number, high: number, confidence: string, bucketKey: string}|null}
+ */
+export function estimateSalary(job, benchmarks) {
+  if (job?.salary && Number.isFinite(job.salary.max)) return null;
+  const bucket = lookupBucket(job?.title, benchmarks);
+  if (!bucket) return null;
+  return { low: bucket.low, high: bucket.high, confidence: bucket.confidence, bucketKey: bucket.key };
+}
+
 // ── Triage scoring ─────────────────────────────────────────────────
 
 // Fit round 1: fix round 1. bestOverlap on raw "software"/"engineer" tokens
@@ -322,9 +438,11 @@ function skillPatterns(profile) {
  * @param {any} job
  * @param {any} profile — parsed config/profile.yml
  * @param {number} now — epoch ms, injected for deterministic tests
+ * @param {any} [benchmarks] — result of loadBenchmarks(), or null/omitted for
+ *   today's behaviour (no imputation)
  * @returns {number}
  */
-export function scoreJob(job, profile, now = Date.now()) {
+export function scoreJob(job, profile, now = Date.now(), benchmarks = null) {
   const title = String(job?.title || '');
   const lowerTitle = title.toLowerCase();
   const titleTokens = new Set(roleTokens(title));
@@ -357,12 +475,29 @@ export function scoreJob(job, profile, now = Date.now()) {
   // 3. Foreign-stack penalty (-25): a technology the candidate has none of.
   const foreignPenalty = FOREIGN_STACK_PATTERNS.some(re => re.test(lowerTitle)) ? 25 : 0;
 
-  // Salary: a posted figure clearing the floor is a positive signal. No posted
-  // salary is neutral, never a penalty — ~69% of listings post nothing.
+  // Salary: a posted figure clearing the floor is a positive signal. With no
+  // posted figure (~69% of listings, and ALL of LinkedIn's), fall back to an
+  // estimate from the benchmarks bucket — annualized (bucket values are
+  // monthly) before comparing to floorAnnual. An estimate can never score as
+  // high as a posted figure, and never scores 0: it's a guess, and a wrong
+  // guess must not bury a job the way a real below-floor salary does.
   const floorAnnual = parseFloorAnnual(profile);
   let salaryScore = 10;
   if (job?.salary && Number.isFinite(job.salary.max)) {
     salaryScore = job.salary.max >= floorAnnual ? 25 : 0;
+  } else {
+    const est = estimateSalary(job, benchmarks);
+    if (est) {
+      const lowAnnual = est.low * 12;
+      const highAnnual = est.high * 12;
+      if (lowAnnual >= floorAnnual) {
+        salaryScore = est.confidence === 'high' ? 20 : est.confidence === 'medium' ? 16 : 12;
+      } else if (highAnnual >= floorAnnual) {
+        salaryScore = 10; // straddles the floor — genuinely unknown, same as no signal
+      } else {
+        salaryScore = 5; // entirely below floor — mild negative, not zero
+      }
+    }
   }
 
   // Recency: full marks today, decaying to zero at 45 days.
@@ -391,11 +526,15 @@ function parseFloorAnnual(profile) {
  * @param {any} profile
  * @param {number} limit
  * @param {number} [now]
+ * @param {any} [benchmarks] — result of loadBenchmarks(), or null
  */
-export function rankJobs(jobs, profile, limit = TOP_N, now = Date.now()) {
+export function rankJobs(jobs, profile, limit = TOP_N, now = Date.now(), benchmarks = null) {
   if (!Array.isArray(jobs)) return [];
   return jobs
-    .map(j => ({ ...j, score: scoreJob(j, profile, now) }))
+    .map(j => {
+      const est = estimateSalary(j, benchmarks);
+      return { ...j, score: scoreJob(j, profile, now, benchmarks), ...(est ? { salaryEstimate: est } : {}) };
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
 }
@@ -406,7 +545,7 @@ const escapeHtml = (s) => String(s ?? '')
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
-/** Human-readable monthly SGD from an annualized salary object. */
+/** Human-readable monthly SGD from an annualized posted salary object. */
 function salaryText(salary) {
   if (!salary || !Number.isFinite(salary.min)) return null;
   const fmt = (n) => Math.round(n / 12).toLocaleString('en-SG');
@@ -416,27 +555,41 @@ function salaryText(salary) {
 }
 
 /**
- * Render the complete digest page.
- * @param {{jobs: Array<any>, applied: Array<any>, failures: string[], date: string}} args
- * @returns {string}
+ * The salary cell for one job row. A posted figure (annualized, divided down
+ * to monthly here) always renders in the plain form. An estimate — already
+ * monthly in the benchmarks file, no conversion needed — renders with a
+ * "~" prefix, an "(est.)" suffix, muted styling, and a tooltip naming the
+ * bucket, so it can never be mistaken for a posted figure. Neither ⇒
+ * "salary undisclosed".
  */
-export function renderDigest({ jobs, applied, failures, date }) {
-  const rows = (jobs || []).map((j, i) => {
-    const sal = salaryText(j.salary);
-    return `      <tr>
+function salaryCell(job) {
+  const posted = salaryText(job.salary);
+  if (posted) return escapeHtml(posted);
+  if (job.salaryEstimate) {
+    const { low, high, confidence, bucketKey } = job.salaryEstimate;
+    const fmt = (n) => Math.round(n).toLocaleString('en-SG');
+    const text = low === high
+      ? `~SGD ${fmt(low)}/mo (est.)`
+      : `~SGD ${fmt(low)} – ${fmt(high)}/mo (est.)`;
+    const title = `Estimated from the "${bucketKey}" benchmark bucket (${confidence} confidence) — not posted by the employer.`;
+    return `<span class="est" title="${escapeHtml(title)}">${escapeHtml(text)}</span>`;
+  }
+  return '<span class="muted">salary undisclosed</span>';
+}
+
+/** The shared table markup, reused by every source section. */
+function renderJobsTable(jobs) {
+  const rows = jobs.map((j, i) => `      <tr>
         <td class="num">${i + 1}</td>
         <td><a href="${escapeHtml(j.url)}" target="_blank" rel="noopener">${escapeHtml(j.title)}</a></td>
         <td>${escapeHtml(j.company) || '<span class="muted">unknown</span>'}</td>
         <td>${escapeHtml(j.location)}</td>
-        <td>${sal ? escapeHtml(sal) : '<span class="muted">salary undisclosed</span>'}</td>
+        <td>${salaryCell(j)}</td>
         <td>${j.postedAt ? new Date(j.postedAt).toISOString().slice(0, 10) : '<span class="muted">—</span>'}</td>
         <td class="num">${j.score}</td>
-      </tr>`;
-  }).join('\n');
+      </tr>`).join('\n');
 
-  const body = (jobs || []).length === 0
-    ? `<p class="empty">No new roles today. Nothing matched the filters that you have not already applied to.</p>`
-    : `<table>
+  return `<table>
       <thead>
         <tr><th>#</th><th>Role</th><th>Company</th><th>Location</th><th>Salary</th><th>Posted</th><th>Triage</th></tr>
       </thead>
@@ -444,6 +597,53 @@ export function renderDigest({ jobs, applied, failures, date }) {
 ${rows}
       </tbody>
     </table>`;
+}
+
+/** One source section: its own heading/count, its own top-10 table (or, with
+ * zero jobs, a worded empty state instead of a blank table). */
+function renderSection({ label, jobs }) {
+  const list = jobs || [];
+  const body = list.length === 0
+    ? `<p class="empty">No ${escapeHtml(label)} roles today. Nothing matched the filters that you have not already applied to.</p>`
+    : renderJobsTable(list);
+  return `<h2>${escapeHtml(label)} (${list.length})</h2>
+  ${body}`;
+}
+
+/** True when the benchmarks reference is past its documented refresh date,
+ * compared against `date` (digestDate) rather than the machine's own clock —
+ * same timezone-correctness reasoning as digestDate itself. */
+function isBenchmarksStale(benchmarks, date) {
+  const refreshAfter = benchmarks?.meta?.refresh_after;
+  if (!refreshAfter) return false;
+  const refreshDate = refreshAfter instanceof Date
+    ? refreshAfter.toISOString().slice(0, 10)
+    : String(refreshAfter).slice(0, 10);
+  return date > refreshDate;
+}
+
+/**
+ * Render the complete digest page.
+ * @param {{
+ *   sections: Array<{label: string, jobs: Array<any>}>, applied: Array<any>,
+ *   failures: string[], date: string, benchmarks?: any,
+ * }} args
+ * @returns {string}
+ */
+export function renderDigest({ sections, applied, failures, date, benchmarks }) {
+  const body = (sections || []).map(renderSection).join('\n  ');
+
+  const crossSectionNote = (sections || []).length > 1
+    ? `<p class="note">Scores are not comparable across the sections above: LinkedIn never
+    publishes a salary, so its scores lean on the estimates labelled &ldquo;est.&rdquo; below,
+    while JobStreet's mostly use a real posted figure. A lower LinkedIn score does not mean a
+    worse-matched role.</p>`
+    : '';
+
+  const staleNote = isBenchmarksStale(benchmarks, date)
+    ? `<p class="note warn-note">The salary reference (config/salary-benchmarks.yml) is stale —
+    past its refresh_after date — and should be refreshed.</p>`
+    : '';
 
   const appliedSection = (applied || []).length === 0
     ? ''
@@ -498,6 +698,9 @@ ${failures.map(f => `        <li>${escapeHtml(f)}</li>`).join('\n')}
   .warn ul { margin: .4rem 0 0; padding-left: 1.1rem; }
   .empty { color: var(--muted); padding: 2rem 0; }
   .applied { padding-left: 1.1rem; }
+  .est { color: var(--muted); font-style: italic; }
+  .note { color: var(--muted); font-size: .85rem; margin: 0 0 1rem; }
+  .note.warn-note { color: var(--warn-fg); background: var(--warn-bg); padding: .6rem .8rem; border-radius: 6px; }
   footer { margin-top: 2.5rem; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); padding-top: 1rem; }
 </style>
 </head>
@@ -506,7 +709,9 @@ ${failures.map(f => `        <li>${escapeHtml(f)}</li>`).join('\n')}
   <h1>Job digest — ${escapeHtml(date)}</h1>
   <p class="sub">Singapore roles you have not applied to yet.</p>
   ${failureSection}
+  ${staleNote}
   ${body}
+  ${crossSectionNote}
   ${appliedSection}
   <footer>
     <p><strong>Triage</strong> is a cheap local ordering from title match, posted salary, and recency.
@@ -576,7 +781,7 @@ export async function collectJobs({
         if (!locationOk(job.location)) continue;
         if (!salaryOk(job.salary)) continue;
         seen.add(job.url);
-        jobs.push(job);
+        jobs.push({ ...job, source: entry.provider });
       }
     } catch (err) {
       failures.push(`${entry.name} (${entry.provider}): ${err.message}`);
@@ -614,12 +819,24 @@ async function main() {
     portals, ctx, pending, applied, titleOk, locationOk, salaryOk,
   });
 
+  // Optional reference file — null when absent, so imputation just doesn't
+  // happen. loadBenchmarks throws (uncaught, by design) on a malformed file
+  // rather than silently scoring against garbage.
+  const benchmarks = loadBenchmarks();
+
   const date = digestDate(profile);
+  // Rank each source independently — LinkedIn no longer competes for the same
+  // combined top 10 that JobStreet's larger, priced volume always wins.
+  const sections = Object.keys(PROVIDERS).map(id => ({
+    label: SOURCE_LABELS[id] || id,
+    jobs: rankJobs(collected.filter(j => j.source === id), profile, TOP_N, undefined, benchmarks),
+  }));
   const html = renderDigest({
-    jobs: rankJobs(collected, profile, TOP_N),
+    sections,
     applied: pickAppliedToday(appliedRows, date),
     failures,
     date,
+    benchmarks,
   });
 
   if (!existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -627,7 +844,8 @@ async function main() {
   writeFileSync(outPath, html, 'utf-8');
 
   console.log(`Digest written: ${outPath}`);
-  console.log(`  candidates: ${collected.length}, shown: ${Math.min(collected.length, TOP_N)}`);
+  console.log(`  candidates: ${collected.length}`);
+  for (const s of sections) console.log(`  ${s.label}: shown ${s.jobs.length}`);
   if (failures.length) console.log(`  failed sources: ${failures.length}`);
 }
 

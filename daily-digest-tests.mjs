@@ -5,12 +5,19 @@
  * Run: node daily-digest-tests.mjs
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, mkdtempSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import yaml from 'js-yaml';
 import {
   scoreJob, rankJobs, renderDigest, parseAppliedUrls, parseAppliedRows,
   pickAppliedToday, parsePendingUrls, digestDate, collectJobs, skillTokens,
+  loadBenchmarks, classifyTitle, lookupBucket,
 } from './daily-digest.mjs';
+// scan.mjs guards its main() behind an import.meta.url check, so importing it
+// here (for buildSalaryFilter, to prove the hard filter never sees an
+// estimate) is safe — same reasoning daily-digest.mjs itself documents.
+import { buildSalaryFilter } from './scan.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -352,8 +359,11 @@ assert(
 
 section('renderDigest');
 
+// Interface change (Feature 2 — split the digest by source): renderDigest now
+// takes `sections` (an array of {label, jobs}) instead of one combined `jobs`
+// list. Single-list callers below adapt by wrapping their jobs in one section.
 const html = renderDigest({
-  jobs: rankJobs([job({ salary: { min: 84000, max: 96000, currency: 'SGD' } })], PROFILE, 10),
+  sections: [{ label: 'JobStreet', jobs: rankJobs([job({ salary: { min: 84000, max: 96000, currency: 'SGD' } })], PROFILE, 10) }],
   applied: [{ company: 'Beta', title: 'Backend Engineer', url: 'https://x/1' }],
   failures: ['linkedin-guest: HTTP 429'],
   date: '2026-08-20',
@@ -366,15 +376,23 @@ assert(html.includes('linkedin-guest: HTTP 429'), 'names the failed source');
 assert(html.includes('Backend Engineer'), 'includes the applied-today section');
 assert(/prefers-color-scheme/.test(html), 'is theme-aware');
 
-const noSalary = renderDigest({ jobs: rankJobs([job()], PROFILE, 10), applied: [], failures: [], date: '2026-08-20' });
-assert(/salary undisclosed/i.test(noSalary), 'labels an unpriced job explicitly');
+const noSalary = renderDigest({
+  sections: [{ label: 'JobStreet', jobs: rankJobs([job()], PROFILE, 10) }],
+  applied: [], failures: [], date: '2026-08-20',
+});
+assert(/salary undisclosed/i.test(noSalary), 'labels an unpriced job explicitly (no benchmarks -> no estimate)');
 
-const empty = renderDigest({ jobs: [], applied: [], failures: [], date: '2026-08-20' });
-assert(/no new roles/i.test(empty), 'empty digest says so rather than rendering a blank table');
+const empty = renderDigest({
+  sections: [{ label: 'JobStreet', jobs: [] }, { label: 'LinkedIn', jobs: [] }],
+  applied: [], failures: [], date: '2026-08-20',
+});
+assert(/no jobstreet roles/i.test(empty), 'a zero-job section says so in words rather than rendering a blank table');
+assert(/no linkedin roles/i.test(empty), 'the second zero-job section says so too');
+assert(!/<table/i.test(empty), 'no table markup at all when every section is empty');
 
 assert(
   !renderDigest({
-    jobs: rankJobs([job({ company: '<script>alert(1)</script>' })], PROFILE, 10),
+    sections: [{ label: 'JobStreet', jobs: rankJobs([job({ company: '<script>alert(1)</script>' })], PROFILE, 10) }],
     applied: [], failures: [], date: '2026-08-20',
   }).includes('<script>alert(1)</script>'),
   'escapes HTML in job fields'
@@ -473,14 +491,14 @@ assert(
 section('renderDigest — salary is displayed MONTHLY (annual ÷ 12)');
 
 const salaryHtml = renderDigest({
-  jobs: [{ ...job({ salary: { min: 84000, max: 96000, currency: 'SGD' } }), score: 50 }],
+  sections: [{ label: 'JobStreet', jobs: [{ ...job({ salary: { min: 84000, max: 96000, currency: 'SGD' } }), score: 50 }] }],
   applied: [], failures: [], date: '2026-08-20',
 });
 assert(salaryHtml.includes('SGD 7,000 – 8,000/mo'), 'an 84k–96k annual range renders as SGD 7,000 – 8,000/mo');
 assert(!salaryHtml.includes('84,000') && !salaryHtml.includes('96,000'), 'the annual figures are never printed');
 
 const singleSalaryHtml = renderDigest({
-  jobs: [{ ...job({ salary: { min: 72000, max: 72000, currency: 'SGD' } }), score: 50 }],
+  sections: [{ label: 'JobStreet', jobs: [{ ...job({ salary: { min: 72000, max: 72000, currency: 'SGD' } }), score: 50 }] }],
   applied: [], failures: [], date: '2026-08-20',
 });
 assert(singleSalaryHtml.includes('SGD 6,000/mo'), 'a single 72k annual value renders as one monthly figure, SGD 6,000/mo');
@@ -567,6 +585,229 @@ const B = { title: 'Backend Engineer', url: 'https://x/2', company: 'Beta', loca
   });
   assert(jobs.length === 0, 'a disabled entry is skipped');
 }
+
+// ── Feature 1: salary imputation for unpriced postings ─────────────
+
+section('loadBenchmarks');
+
+assert(loadBenchmarks('does/not/exist.yml') === null, 'an absent benchmarks file returns null, not a throw');
+
+const benchTmpDir = mkdtempSync(join(tmpdir(), 'daily-digest-bench-'));
+const malformedPath = join(benchTmpDir, 'malformed.yml');
+writeFileSync(malformedPath, 'buckets: [\n  - key: mid/*\n    low: 6500\n', 'utf-8');
+{
+  let threw = false;
+  try { loadBenchmarks(malformedPath); } catch { threw = true; }
+  assert(threw, 'malformed YAML throws rather than silently degrading to no imputation');
+}
+
+const REAL_BENCHMARKS = loadBenchmarks('config/salary-benchmarks.yml');
+assert(REAL_BENCHMARKS !== null, 'the real config/salary-benchmarks.yml loads');
+assert(REAL_BENCHMARKS.buckets.length === 8, 'the real file has 8 buckets');
+
+section('classifyTitle');
+
+assert(
+  JSON.stringify(classifyTitle('Senior Full Stack Engineer', REAL_BENCHMARKS)) === JSON.stringify({ band: 'senior', family: 'fullstack' }),
+  '"Senior Full Stack Engineer" -> senior/fullstack'
+);
+assert(
+  JSON.stringify(classifyTitle('Software Engineer', REAL_BENCHMARKS)) === JSON.stringify({ band: 'mid', family: 'general' }),
+  '"Software Engineer" -> mid/general (nothing matches)'
+);
+assert(
+  JSON.stringify(classifyTitle('DevOps Engineer', REAL_BENCHMARKS)) === JSON.stringify({ band: 'mid', family: 'devops' }),
+  '"DevOps Engineer" -> mid/devops'
+);
+assert(
+  JSON.stringify(classifyTitle('Graduate Software Engineer', REAL_BENCHMARKS)) === JSON.stringify({ band: 'junior', family: 'general' }),
+  '"Graduate Software Engineer" -> junior/general'
+);
+for (const title of ['Email Marketing Engineer', 'Mailing List Software Engineer']) {
+  assert(
+    classifyTitle(title, REAL_BENCHMARKS).family !== 'data',
+    `"${title}" does not classify as data — the " ai " pattern must not match the "ai" hiding inside "email"/"mailing"`
+  );
+}
+
+section('lookupBucket');
+
+assert(lookupBucket('anything', null) === null, 'returns null when benchmarks is null');
+assert(lookupBucket('DevOps Engineer', REAL_BENCHMARKS).key === 'mid/devops', 'resolves an exact "<band>/<family>" bucket when one exists');
+assert(lookupBucket('Software Engineer', REAL_BENCHMARKS).key === 'mid/*', 'falls back to "<band>/*" when no exact "<band>/<family>" bucket exists');
+
+const NO_WILDCARD_BENCHMARKS = {
+  buckets: [{ key: 'mid/devops', low: 1, high: 2, confidence: 'high' }],
+  default: { low: 5000, high: 8000, confidence: 'low' },
+  classify: { bands: {}, families: {} },
+};
+assert(
+  lookupBucket('Software Engineer', NO_WILDCARD_BENCHMARKS).key === 'default',
+  'falls all the way back to the global default when neither an exact nor a "<band>/*" bucket exists'
+);
+
+section('scoreJob — salary imputation tiers (Feature 1)');
+
+// A minimal benchmarks fixture per tier, so only the salary term varies
+// against the SAME base title/profile/now used everywhere else in this file.
+function mkBenchmarks(low, high, confidence) {
+  return {
+    buckets: [{ key: 'mid/*', low, high, source: 'test', confidence, note: '' }],
+    default: { low: 5000, high: 8000, confidence: 'low' },
+    classify: { bands: {}, families: {} },
+  };
+}
+
+const tierJob = (over = {}) => job({ title: 'Software Engineer', ...over });
+
+const postedAbove = scoreJob(tierJob({ salary: { min: 84000, max: 96000, currency: 'SGD' } }), PROFILE, NOW);
+const postedBelow = scoreJob(tierJob({ salary: { min: 48000, max: 60000, currency: 'SGD' } }), PROFILE, NOW);
+// floor = SGD6000/month = 72000/year (PROFILE.compensation.minimum). Bucket
+// values below are MONTHLY, exactly like the real benchmarks file.
+const estimatedHigh = scoreJob(tierJob(), PROFILE, NOW, mkBenchmarks(6500, 9500, 'high')); // 78k-114k annualized: clears
+const estimatedMedium = scoreJob(tierJob(), PROFILE, NOW, mkBenchmarks(6500, 9500, 'medium'));
+const estimatedLow = scoreJob(tierJob(), PROFILE, NOW, mkBenchmarks(6500, 9500, 'low'));
+const straddles = scoreJob(tierJob(), PROFILE, NOW, mkBenchmarks(5000, 7000, 'high')); // 60k-84k annualized: straddles 72k
+const estimatedBelow = scoreJob(tierJob(), PROFILE, NOW, mkBenchmarks(3000, 4000, 'high')); // 36k-48k annualized: below
+const noBenchmarks = scoreJob(tierJob(), PROFILE, NOW, null);
+
+assert(postedAbove > estimatedHigh, 'posted-above outscores estimated-high');
+assert(estimatedHigh > estimatedMedium, 'estimated-high outscores estimated-medium');
+assert(estimatedMedium > estimatedLow, 'estimated-medium outscores estimated-low');
+assert(estimatedLow > straddles, 'estimated-low outscores straddles (genuinely unknown)');
+assert(straddles === noBenchmarks, 'straddling the floor scores exactly the same as having no benchmarks at all');
+assert(straddles > estimatedBelow, 'straddles outscores an estimate that is entirely below the floor');
+assert(estimatedBelow > postedBelow, 'an estimate entirely below the floor still outscores a POSTED figure below the floor');
+for (const [name, score] of [
+  ['estimated-high', estimatedHigh], ['estimated-medium', estimatedMedium], ['estimated-low', estimatedLow],
+  ['straddles', straddles], ['estimated-below', estimatedBelow],
+]) {
+  assert(score < postedAbove, `${name} never scores as high as a posted-above figure`);
+  assert(score > 0, `${name} never scores 0 — an estimate must never bury a job the way a real below-floor salary does`);
+}
+
+// Unit safety: a bucket of monthly 6500-9500 against a 6000/month floor must
+// count as CLEARING. A monthly/annual unit slip (comparing bucket.low bare
+// against floorAnnual, e.g. `6500 >= 72000`) would read as false and wrongly
+// rank this bucket with the entirely-below-floor tier instead of the highest
+// estimate tier — this assertion fails under that bug.
+assert(
+  estimatedHigh > straddles && estimatedHigh > estimatedBelow,
+  'a monthly 6500-9500 bucket against a 6000/month floor scores in the "clears" tier, not the "below floor" tier'
+);
+
+section('collectJobs — the hard filter never sees an estimate (Feature 1)');
+
+{
+  // No salary field at all, and its title's benchmark bucket (junior, entirely
+  // below the 6000/month floor per the real config) would fail the hard
+  // filter if it were ever handed the estimate. collectJobs must still
+  // collect it — the estimate is computed later, only for ranking/rendering.
+  const noSalaryJob = { title: 'Junior Software Engineer', url: 'https://x/est-below', company: 'Acme', location: 'Singapore' };
+  const salaryFilterOk = buildSalaryFilter({ min: 72000, max: 0, currency: 'SGD' });
+  const { jobs: filtered } = await collectJobs({
+    portals: { tracked_companies: [{ name: 'Fake', provider: 'fake' }] },
+    ctx: fakeCtx, pending: new Set(), applied: new Set(),
+    titleOk: passAll, locationOk: passAll, salaryOk: salaryFilterOk,
+    providers: { fake: providerOf([noSalaryJob]) },
+  });
+  assert(
+    filtered.length === 1 && filtered[0].url === 'https://x/est-below',
+    'a job with no posted salary is collected regardless of what its estimate would say — the hard filter only ever sees job.salary'
+  );
+
+  const ranked = rankJobs(filtered, PROFILE, 10, NOW, mkBenchmarks(3000, 4000, 'high'));
+  assert(ranked.length === 1, 'a below-floor estimate only affects ranking, never collection — the job still appears, just scored low');
+}
+
+// ── Feature 2: split the digest by source ───────────────────────────
+
+section('collectJobs — source tagging');
+
+{
+  const { jobs: tagged } = await collectJobs({
+    portals: { tracked_companies: [
+      { name: 'JS Co', provider: 'jobstreet' },
+      { name: 'LI Co', provider: 'linkedin' },
+    ] },
+    ctx: fakeCtx, pending: new Set(), applied: new Set(),
+    titleOk: passAll, locationOk: passAll, salaryOk: passAll,
+    providers: {
+      jobstreet: providerOf([{ ...A, url: 'https://x/js1' }]),
+      linkedin: providerOf([{ ...B, url: 'https://x/li1' }]),
+    },
+  });
+  assert(tagged.find(j => j.url === 'https://x/js1')?.source === 'jobstreet', 'a job from the jobstreet entry is tagged source: "jobstreet"');
+  assert(tagged.find(j => j.url === 'https://x/li1')?.source === 'linkedin', 'a job from the linkedin entry is tagged with its own provider id');
+}
+
+section('rankJobs / renderDigest — independent per-source sections');
+
+const jsJobs = Array.from({ length: 15 }, (_, i) => job({ url: `https://x/js/${i}`, title: 'Full Stack Software Engineer' }));
+const liJobs = Array.from({ length: 3 }, (_, i) => job({ url: `https://x/li/${i}`, title: 'Full Stack Software Engineer' }));
+const jsRanked = rankJobs(jsJobs, PROFILE, 10);
+const liRanked = rankJobs(liJobs, PROFILE, 10);
+assert(jsRanked.length === 10, 'a 15-job source caps at 10 independently');
+assert(liRanked.length === 3, 'a 3-job source renders all 3 (no padding, no borrowing from the other source)');
+
+const twoSectionHtml = renderDigest({
+  sections: [{ label: 'JobStreet', jobs: jsRanked }, { label: 'LinkedIn', jobs: liRanked }],
+  applied: [], failures: [], date: '2026-08-20',
+});
+assert(twoSectionHtml.indexOf('JobStreet') < twoSectionHtml.indexOf('LinkedIn'), 'the JobStreet section renders before the LinkedIn section');
+// Each data row carries exactly two `class="num"` cells (row # and score);
+// the header row uses `<th>`, not `<td>`, so this counts data rows only.
+assert(
+  (twoSectionHtml.match(/<td class="num">/g) || []).length === 13 * 2,
+  'both sections together render exactly 13 data rows (10 + 3), independently capped'
+);
+
+const oneEmptySectionHtml = renderDigest({
+  sections: [{ label: 'JobStreet', jobs: jsRanked }, { label: 'LinkedIn', jobs: [] }],
+  applied: [], failures: [], date: '2026-08-20',
+});
+assert(/no linkedin roles/i.test(oneEmptySectionHtml), 'a zero-job LinkedIn section renders its empty-state wording');
+assert(!/no jobstreet roles/i.test(oneEmptySectionHtml), 'the non-empty JobStreet section does not render empty-state wording');
+
+section('renderDigest — estimate labelling and the required notes');
+
+const postedRowJob = { ...job({ url: 'https://x/posted', salary: { min: 84000, max: 96000, currency: 'SGD' } }), score: 70 };
+const estimatedRowJob = { ...job({ url: 'https://x/est' }), score: 60, salaryEstimate: { low: 6500, high: 9500, confidence: 'high', bucketKey: 'mid/*' } };
+
+const labelHtml = renderDigest({
+  sections: [{ label: 'JobStreet', jobs: [postedRowJob] }, { label: 'LinkedIn', jobs: [estimatedRowJob] }],
+  applied: [], failures: [], date: '2026-08-20',
+});
+assert(labelHtml.includes('SGD 7,000 – 8,000/mo'), 'a posted row renders the plain posted format');
+assert(!labelHtml.includes('SGD 7,000 – 8,000/mo (est.)'), 'the posted row never carries the estimate marker');
+assert(labelHtml.includes('~SGD 6,500 – 9,500/mo (est.)'), 'an estimated row renders the distinct "~...(est.)" form using the bucket\'s own monthly figures (no /12)');
+assert(/not comparable/i.test(labelHtml), 'the cross-section score-incomparability note is present with more than one section');
+
+const oneSectionHtml = renderDigest({
+  sections: [{ label: 'JobStreet', jobs: [postedRowJob] }],
+  applied: [], failures: [], date: '2026-08-20',
+});
+assert(!/not comparable/i.test(oneSectionHtml), 'a single-section digest carries no cross-section note — there is nothing to compare');
+
+const staleHtml = renderDigest({
+  sections: [{ label: 'JobStreet', jobs: [postedRowJob] }],
+  applied: [], failures: [], date: '2026-08-20',
+  benchmarks: { meta: { refresh_after: new Date('2020-01-01') } },
+});
+assert(/stale/i.test(staleHtml) && /refresh_after/i.test(staleHtml), 'a refresh_after in the past surfaces a visible stale-reference note');
+
+const freshHtml = renderDigest({
+  sections: [{ label: 'JobStreet', jobs: [postedRowJob] }],
+  applied: [], failures: [], date: '2026-08-20',
+  benchmarks: { meta: { refresh_after: new Date('2099-01-01') } },
+});
+assert(!/refresh_after/i.test(freshHtml), 'a refresh_after in the future adds no stale-reference note');
+
+const noBenchmarksHtml = renderDigest({
+  sections: [{ label: 'JobStreet', jobs: [postedRowJob] }],
+  applied: [], failures: [], date: '2026-08-20', benchmarks: null,
+});
+assert(!/refresh_after/i.test(noBenchmarksHtml), 'no benchmarks at all -> no stale note either');
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

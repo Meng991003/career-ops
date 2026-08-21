@@ -1,0 +1,181 @@
+# Singapore software-engineering salary reference — monthly SGD, gross base.
+#
+# PURPOSE
+# Many postings do not publish a salary. LinkedIn's public guest endpoint never
+# does, and only ~23% of JobStreet SG listings do. This file lets daily-digest.mjs
+# ESTIMATE whether an unpriced posting is likely to clear the candidate's floor,
+# so an unpriced-but-well-matched role is not permanently outranked by a priced one.
+#
+# HOW IT IS USED — read this before tuning anything
+#   - Estimates feed the TRIAGE SCORE ONLY. They never drive the hard salary
+#     filter. A hard reject still requires a salary the employer actually posted.
+#     An estimate is wrong often enough that letting it hide a job would be worse
+#     than showing an extra one.
+#   - Anything derived from this file is labelled as an estimate in the digest,
+#     never shown as if the employer had published it.
+#
+# TWO SOURCES, AND THEY DISAGREE — the gap is the useful part
+#   market_survey  : aggregated public salary data for the Singapore tech market
+#                    (NodeFlair, levels.fyi, Glassdoor, PayScale, Indeed SG), 2026.
+#   jobstreet_sg   : what JobStreet SG postings ACTUALLY published, measured from
+#                    94 parsed salary labels across 404 unique listings on
+#                    2026-08-21 by this project's own parser.
+#
+#   JobStreet runs CONSISTENTLY LOWER than the market surveys — roughly
+#   SGD 1,000-1,500/month lower at the mid band. The likely reason is composition:
+#   JobStreet SG carries a high share of SME, IT-services and recruiter-agency
+#   postings, while the survey sites skew toward product and tech companies.
+#   Employers offering top-of-market pay also disclose less often, which biases
+#   the disclosed subset downward.
+#
+#   Practical consequence: JobStreet figures describe what this routine's largest
+#   source actually advertises. Survey figures better describe LinkedIn postings,
+#   which skew tech-company. Imputation therefore uses market_survey, because it
+#   is applied to unpriced postings and those are mostly LinkedIn.
+#
+# REFRESH
+# Salary data moves slowly; twice a year is plenty. Re-derive the jobstreet_sg
+# figures by re-running the parser over a fresh corpus, and re-check the survey
+# numbers against the sources listed at the bottom.
+
+meta:
+  compiled: 2026-08-21
+  refresh_after: 2027-02-21
+  currency: SGD
+  period: monthly
+  basis: gross base salary, excluding bonus / AWS / equity
+
+# ---------------------------------------------------------------------------
+# Primary lookup for imputation. Keys are "<band>/<family>", with a "<band>/*"
+# fallback and a global default. `confidence` gates how much weight the score
+# gives an estimate: high = survey and local data broadly agree; medium = survey
+# only, or the two disagree; low = thin evidence, treat as barely better than
+# no signal at all.
+# ---------------------------------------------------------------------------
+buckets:
+  - key: junior/*
+    low: 4000
+    high: 6500
+    source: market_survey
+    confidence: medium
+    note: 0-2 years. JobStreet's own junior postings sat far lower (2000-2500) but n=4, too thin to trust.
+
+  - key: mid/*
+    low: 6500
+    high: 9500
+    source: market_survey
+    confidence: high
+    note: 3-5 years. JobStreet posted 5000-6500 for the same band (n=73) — see the composition note above.
+
+  - key: senior/*
+    low: 9000
+    high: 15000
+    source: market_survey
+    confidence: medium
+    note: >-
+      6+ years. Survey medians for senior sit near 9000-13000; total comp at
+      top-tier firms exceeds 20000 but that includes bonus and equity, which this
+      file deliberately excludes. JobStreet posted 6500-9000 (n=17).
+
+  - key: mid/devops
+    low: 8500
+    high: 14000
+    source: market_survey
+    confidence: medium
+    note: DevOps/platform/SRE carries a 5-15% premium over general SWE on strong demand and thin supply.
+
+  - key: mid/data
+    low: 7000
+    high: 9500
+    source: both
+    confidence: high
+    note: Survey puts data/AI above average; JobStreet independently posted 7000-9500 (n=9). The two agree.
+
+  - key: mid/fullstack
+    low: 6500
+    high: 9500
+    source: market_survey
+    confidence: medium
+    note: >-
+      NodeFlair puts full-stack at the same median as general SWE (6750).
+      JobStreet posted 4700-6000 (n=13), below its own general band — small-sample
+      noise rather than a real full-stack discount, so the survey figure is used.
+
+  - key: mid/backend
+    low: 6500
+    high: 9500
+    source: market_survey
+    confidence: medium
+    note: NodeFlair backend median 6750, range 3550-15000. JobStreet n=2, unusable.
+
+  - key: mid/frontend
+    low: 6000
+    high: 9000
+    source: market_survey
+    confidence: low
+    note: Tracks general SWE closely; React/Next.js in demand. JobStreet n=2, unusable.
+
+default:
+  low: 5000
+  high: 8000
+  confidence: low
+  note: >-
+    Used when a title matches no band or family. Deliberately wide and low-
+    confidence — it should barely move the score. Anchored on the whole-corpus
+    JobStreet median (5750) rather than the survey, so an unclassifiable title is
+    not flattered.
+
+# ---------------------------------------------------------------------------
+# Recorded for cross-checking and for refresh diffs. NOT used for imputation.
+# Measured by providers/jobstreet.mjs parseSalaryLabel over 404 unique
+# sg.jobstreet.com listings on 2026-08-21; 94 carried a parseable salary.
+# Values are the median low and median high of the posted ranges.
+# ---------------------------------------------------------------------------
+jobstreet_sg_observed:
+  sampled_listings: 404
+  with_parsed_salary: 94
+  by_band:
+    mid:    { low: 5000, high: 6500, n: 73 }
+    senior: { low: 6500, high: 9000, n: 17 }
+    junior: { low: 2000, high: 2500, n: 4 }
+  by_family:
+    general:   { low: 5000, high: 6500, n: 67 }
+    fullstack: { low: 4700, high: 6000, n: 13 }
+    data:      { low: 7000, high: 9500, n: 9 }
+    backend:   { low: 5500, high: 8500, n: 2 }
+    frontend:  { low: 4200, high: 5200, n: 2 }
+    devops:    { low: 5000, high: 6000, n: 1 }
+  whole_corpus_median_midpoint: 5750
+
+# ---------------------------------------------------------------------------
+# Title classification. daily-digest.mjs uses these to pick a bucket. Patterns
+# are matched case-insensitively against the job title.
+# ---------------------------------------------------------------------------
+classify:
+  bands:
+    senior: [senior, snr, lead, staff, principal]
+    junior: [junior, jnr, intern, entry, graduate, fresh, trainee, associate]
+    # anything else falls to "mid"
+  families:
+    # "platform" must be the title form: a bare "platform" hijacks any
+    # "<X> Platform" backend role (e.g. "Backend Engineer, Large Model Platform")
+    # into the devops bucket and inflates its estimate.
+    devops:    [devops, sre, "platform engineer", cloud, infrastructure, kubernetes]
+    data:      [data engineer, data scientist, machine learning, " ml ", " ai ", analytics]
+    fullstack: [full stack, full-stack, fullstack]
+    backend:   [backend, back end, back-end]
+    frontend:  [frontend, front end, front-end]
+    # anything else falls to "general", which uses the "<band>/*" bucket
+
+# ---------------------------------------------------------------------------
+# Sources consulted 2026-08-21
+#   https://nodeflair.com/salaries/singapore-software-engineer-salary
+#   https://nodeflair.com/salaries/singapore-full-stack-developer-salary
+#   https://nodeflair.com/salaries/singapore-backend-developer-salary
+#   https://nodeflair.com/salaries/singapore-frontend-developer-salary
+#   https://nodeflair.com/salaries/singapore-devops-engineer-salary
+#   https://www.levels.fyi/t/software-engineer/locations/singapore
+#   https://www.glassdoor.sg/Salaries/singapore-software-engineer-salary-SRCH_IL.0,9_IM1123_KO10,27.htm
+#   https://www.payscale.com/research/SG/Job=Software_Engineer/Salary/4ac6c5d9/Singapore
+#   https://sg.indeed.com/career/software-engineer/salaries
+# ---------------------------------------------------------------------------
