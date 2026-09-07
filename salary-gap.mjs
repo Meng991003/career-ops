@@ -101,17 +101,50 @@ function canonicalizeSeparators(numStr) {
   return numStr.replace(grouped, '$1').replace(sep, '.');
 }
 
+// A pay period written onto the amount itself. The dominant convention in
+// reports/ states it ("SGD 6,000-7,000/month"), and it may sit at the end, in
+// the middle ahead of a trailing currency ("110,000 - 200,000/year SGD"), or be
+// repeated on each bound ("SGD 8,000.00/mo - SGD 10,000.00/mo").
+//
+// Left-guarded with (?<![A-Za-z]) as well as right-guarded: without it "MYR" (a
+// live currency here — the candidate's current salary is in MYR) would match "YR"
+// at offset 1, losing two letters of the currency AND inventing period 'year'.
+const PERIOD_RE = /\s*(?:\/|\bper\b)?\s*(?<![A-Za-z])(monthly|months?|mo|annually|annum|yearly|years?|yrs?)(?![A-Za-z])\.?/gi;
+
+// Maps both a PERIOD_RE token and config/profile.yml's own `period:` key onto the
+// two canonical values. Anything unrecognized is null = "no period stated", never
+// a guess — a wrong period is worse than an absent one (see periodComparable).
+export const periodOf = (unit) => {
+  // "per month"/"per annum" reach here from profile.yml's `period:` key; PERIOD_RE
+  // hands over the bare unit. `annu` covers annum AND annually — "annum" is not a
+  // prefix of "annual", so matching on the longer word silently dropped it.
+  const u = String(unit ?? '').trim().toLowerCase().replace(/^per\s+/, '');
+  if (/^mo/.test(u)) return 'month';
+  if (/^(annu|year|yr)/.test(u)) return 'year';
+  return null;
+};
+
 // --- Amount parsing ---
 export function parseAmount(raw) {
   let s = String(raw ?? '').trim();
   if (!s || s === '?' || s === '-' || /^(n\/?a|null)$/i.test(s)) return null;
-  // Strip currency symbols anywhere (US pay-transparency ranges often repeat the
-  // symbol on both bounds: "$123,684—$254,644 USD") and a trailing 3-letter
-  // ISO-4217-style alpha token (any case — "450k SEK", "80-90k eur"). Exactly
-  // three letters, so the lone "k" magnitude suffix ("80k") is never eaten, and
-  // prose ("competitive") still fails the numeric match below even after losing
-  // its last three letters.
-  s = s.replace(/[€$£¥]/g, '').replace(/\s*[A-Za-z]{3}\s*$/, '').trim();
+  // Period FIRST, for two reasons: "per month"/"per annum" contain the 3-letter
+  // word "per" that the currency strip below would otherwise eat, and
+  // "110,000 - 200,000/year SGD" hides its currency behind the period token.
+  const periods = [...s.matchAll(PERIOD_RE)].map(m => periodOf(m[1]));
+  // Two DIFFERENT periods in one value ("1000/mo - 50000/yr") is a contradiction,
+  // not a range. Refuse it rather than silently adopting one of the two bases.
+  if (new Set(periods).size > 1) return null;
+  const period = periods[0] ?? null;
+  s = s.replace(PERIOD_RE, ' ');
+  // Then currency: symbols anywhere (US pay-transparency ranges repeat the symbol
+  // on both bounds: "$123,684—$254,644 USD") and 3-letter ISO-4217-style alpha
+  // tokens anywhere, any case — leading ("SGD 6,000-7,000"), trailing ("450k SEK"),
+  // or glued to each bound ("SGD6,500 - SGD9,500"). Bounded by (?<![A-Za-z])/
+  // (?![A-Za-z]) rather than \b so that a currency glued to a digit is still seen
+  // (there is no \b between "D" and "6"), while three letters inside a longer word
+  // are not ("competitive" survives whole and fails the numeric match below).
+  s = s.replace(/[€$£¥]/g, ' ').replace(/(?<![A-Za-z])[A-Za-z]{3}(?![A-Za-z])/g, ' ').trim();
   const toNum = (numStr, kFlag) => {
     const n = parseFloat(canonicalizeSeparators(numStr));
     return Number.isNaN(n) ? null : (kFlag ? n * 1000 : n);
@@ -122,12 +155,12 @@ export function parseAmount(raw) {
     const hi = toNum(range[3], range[4] || range[2]);
     if (lo === null || hi === null) return null;
     const min = Math.min(lo, hi), max = Math.max(lo, hi);
-    return { min, max, mid: (min + max) / 2 };
+    return { min, max, mid: (min + max) / 2, period };
   }
   const single = s.match(/^([\d.,]+)\s*(k)?$/i);
   if (single) {
     const v = toNum(single[1], single[2]);
-    return v === null ? null : { min: v, max: v, mid: v };
+    return v === null ? null : { min: v, max: v, mid: v, period };
   }
   return null;
 }
@@ -196,7 +229,11 @@ export function reportToObservation(content, num, date) {
   // must not register as currencies. Tradeoff: a lowercase "100k eur" yields
   // UNKNOWN (excluded from gap math, surfaced in currencyMismatches) — acceptable;
   // a corrective TSV observation with an explicit currency overrides it.
-  const currencyGuess = adv ? (adv.match(/\b[A-Z]{3}\b/)?.[0] ?? 'UNKNOWN') : null;
+  // Bounded on letters rather than \b, for the same reason parseAmount is: there is
+  // no word boundary between "D" and "6", so \b[A-Z]{3}\b could not see the currency
+  // in "SGD6,500 - SGD9,500" (#152) and silently called it UNKNOWN — which reads as
+  // "unproven currency" downstream and drops the row from every comparison.
+  const currencyGuess = adv ? (adv.match(/(?<![A-Za-z])[A-Z]{3}(?![A-Za-z])/)?.[0] ?? 'UNKNOWN') : null;
   return {
     company, role,
     observation: adv === null ? null : {
@@ -221,8 +258,20 @@ function pickEffective(type, candidates) {
   if (!usable.length) return null;
   usable.sort((a, b) => (tiers[b.source] - tiers[a.source]) || (a.date < b.date ? 1 : -1));
   const top = usable[0];
-  return { value: top.parsed.mid, source: top.source, date: top.date, currency: top.currency, raw: top.amount };
+  return { value: top.parsed.mid, source: top.source, date: top.date, currency: top.currency, period: top.parsed.period, raw: top.amount };
 }
+
+// A pay period is a unit the gap math cannot convert across, exactly like a
+// currency: advertised "110,000 - 200,000/year" (#109) against an actual logged
+// as a monthly figure is not a -92% gap, it is a category error.
+//
+// Plain equality, so null === null passes: when NEITHER side states a period,
+// nothing has been claimed and both come from the same author's own log — that
+// is the pre-period status quo, and blocking it would collapse every existing
+// comparison to null while adding no information. The dangerous shape — one side
+// explicitly annual, the other silent — does NOT pass, and is reported so the
+// user can state the period rather than wonder where the row went.
+const periodComparable = (a, b) => a.period === b.period;
 
 // --- Fold + aggregates ---
 export function fold(observations, apps, profileDesired) {
@@ -235,6 +284,7 @@ export function fold(observations, apps, profileDesired) {
   const applications = [];
   const orphans = [];
   const currencyMismatches = [];
+  const periodMismatches = [];
   const unparseable = observations
     .filter(o => o.parsed === null && o.amount && o.amount !== '?')
     .map(o => ({ num: o.num, type: o.type, raw: o.amount }));
@@ -246,9 +296,13 @@ export function fold(observations, apps, profileDesired) {
     .filter(o => TRUST[o.type] && !Object.hasOwn(TRUST[o.type], o.source))
     .map(o => ({ num: o.num, type: o.type, source: o.source }));
 
+  const profileParsed = profileDesired?.amount ? parseAmount(profileDesired.amount) : null;
+  // config/profile.yml states the period as its own key (`period: monthly`) rather
+  // than inside target_range, so the range string itself is silent — carry it over.
+  if (profileParsed && !profileParsed.period && profileDesired.period) profileParsed.period = profileDesired.period;
   const profileObs = profileDesired?.amount ? {
     num: '*', date: '0000-00-00', type: 'desired', amount: profileDesired.amount,
-    currency: (profileDesired.currency || 'UNKNOWN').toUpperCase(), source: 'profile', note: '', parsed: parseAmount(profileDesired.amount),
+    currency: (profileDesired.currency || 'UNKNOWN').toUpperCase(), source: 'profile', note: '', parsed: profileParsed,
   } : null;
   // a garbage profile target (e.g. "competitive") would otherwise vanish silently:
   // quality.unparseable above is built from TSV/report observations only
@@ -267,10 +321,17 @@ export function fold(observations, apps, profileDesired) {
     // string equality AND neither side UNKNOWN (two UNKNOWNs could be different real
     // currencies, so UNKNOWN is never comparable — not even with itself). Skips are
     // reported in quality.currencyMismatches, never dropped silently.
-    const advComparable = advertised && actual && advertised.currency === actual.currency && advertised.currency !== 'UNKNOWN';
-    const desComparable = desired && actual && desired.currency === actual.currency && desired.currency !== 'UNKNOWN';
-    if (advertised && actual && !advComparable) currencyMismatches.push({ num, comparison: 'advertised-vs-actual', currencies: [advertised.currency, actual.currency] });
-    if (desired && actual && !desComparable) currencyMismatches.push({ num, comparison: 'desired-vs-actual', currencies: [desired.currency, actual.currency] });
+    // Currency and period are two independent unit guards; a pair must clear both.
+    // A pair that already failed the currency guard is NOT re-reported as a period
+    // mismatch — one skipped comparison, one reason, the first one that applies.
+    const advCurOk = advertised && actual && advertised.currency === actual.currency && advertised.currency !== 'UNKNOWN';
+    const desCurOk = desired && actual && desired.currency === actual.currency && desired.currency !== 'UNKNOWN';
+    const advComparable = advCurOk && periodComparable(advertised, actual);
+    const desComparable = desCurOk && periodComparable(desired, actual);
+    if (advertised && actual && !advCurOk) currencyMismatches.push({ num, comparison: 'advertised-vs-actual', currencies: [advertised.currency, actual.currency] });
+    if (desired && actual && !desCurOk) currencyMismatches.push({ num, comparison: 'desired-vs-actual', currencies: [desired.currency, actual.currency] });
+    if (advCurOk && !advComparable) periodMismatches.push({ num, comparison: 'advertised-vs-actual', periods: [advertised.period, actual.period] });
+    if (desCurOk && !desComparable) periodMismatches.push({ num, comparison: 'desired-vs-actual', periods: [desired.period, actual.period] });
     applications.push({
       num, company: apps[num].company, role: apps[num].role,
       desired, advertised, actual, trail,
@@ -332,6 +393,7 @@ export function fold(observations, apps, profileDesired) {
     quality: {
       orphans, unparseable, invalidSources,
       currencyMismatches: currencyMismatches.sort((a, b) => a.num.localeCompare(b.num)),
+      periodMismatches: periodMismatches.sort((a, b) => a.num.localeCompare(b.num)),
       withoutActual: applications.filter(a => !a.actual).length, latestObservation: today,
     },
   };
@@ -447,6 +509,49 @@ function selfTest() {
   assert(parseAmount('$123,684.50')?.mid === 123684.5, 'comma grouping + period decimal');
   assert(parseAmount('1,250')?.mid === 1250, 'lone comma with exactly three following digits stays grouping');
 
+  // Leading / glued currency + pay-period suffix — the convention reports/ actually
+  // uses. Before this, "6,000-7,000 SGD" was essentially the ONLY shape that parsed,
+  // so 47 of the corpus's amounts (including the profile's own target range) were
+  // excluded from every calculation.
+  assert(parseAmount('SGD 6,000-7,000/month')?.mid === 6500, 'leading ISO + /month');
+  assert(parseAmount('SGD 6,000-7,000')?.mid === 6500, 'leading ISO, no period');
+  assert(parseAmount('6,000-7,000/month')?.mid === 6500, '/month, no currency');
+  assert(parseAmount('6,000-7,000 SGD')?.mid === 6500, 'trailing ISO still parses (no regression)');
+  assert(parseAmount('SGD 6,000–8,000/month')?.mid === 7000, 'leading ISO + en dash + /month');
+  assert(parseAmount('$6,700 – $10,000 per month')?.mid === 8350, 'symbol on both bounds + "per month"');
+  assert(parseAmount('SGD6,500 - SGD9,500')?.mid === 8000, 'ISO glued to each bound');
+  assert(parseAmount('SGD6000-SGD9000')?.mid === 7500, 'ISO glued to each bound, no separators (profile target_range)');
+  assert(parseAmount('SGD 8,000.00/mo - SGD 10,000.00/mo')?.mid === 9000, 'currency AND period repeated on each bound (#143)');
+  assert(parseAmount('SGD 10,000/month')?.mid === 10000, 'single value, leading ISO + /month (#078)');
+  assert(parseAmount('SGD 5000-8000/month')?.mid === 6500, 'unseparated digits, leading ISO + /month (#055)');
+  // #136 was authored as "6,000-12,000 SGD" specifically to dodge this bug; it must
+  // keep parsing identically now that the workaround is no longer needed.
+  assert(parseAmount('6,000-12,000 SGD')?.mid === 9000, '#136 shape unchanged: SGD 6,000-12,000, mid 9k');
+
+  // Pay period is RECORDED, not discarded: #109/#118 are annual while the rest of
+  // the corpus is monthly, and a parser that accepted both without saying which
+  // would hand the fold annual and monthly figures as if they were one unit.
+  assert(parseAmount('SGD 6,000-7,000/month')?.period === 'month', '/month recorded');
+  assert(parseAmount('7000-8500 SGD/month')?.period === 'month', 'period ahead of trailing currency (#069)');
+  assert(parseAmount('SGD 7400-9200/MONTH')?.period === 'month', 'uppercase /MONTH (#086)');
+  assert(parseAmount('SGD 6,500-7,500 per month')?.period === 'month', '"per month" (#062)');
+  assert(parseAmount('SGD 8,000.00/mo - SGD 10,000.00/mo')?.period === 'month', '/mo (#143)');
+  assert(parseAmount('6,000-7,000 monthly')?.period === 'month', 'bare "monthly"');
+  assert(parseAmount('110,000 - 200,000/year SGD')?.period === 'year', '/year, period before trailing currency (#109)');
+  assert(parseAmount('SGD 122400-183600/yr')?.period === 'year', '/yr (#118)');
+  assert(parseAmount('90k per annum')?.period === 'year', '"per annum"');
+  assert(parseAmount('90k annually')?.period === 'year', '"annually"');
+  assert(parseAmount('80-90k EUR')?.period === null, 'no period stated -> null, never guessed');
+  // A single value cannot be quoted on two different bases.
+  assert(parseAmount('1000/mo - 50000/yr') === null, 'contradictory periods refused, not silently folded to one basis');
+  // Period stripping must not chew into a currency: MYR would match "YR" at offset 1
+  // without the left guard (the candidate's current salary is quoted in MYR).
+  assert(parseAmount('MYR 9300')?.mid === 9300 && parseAmount('MYR 9300')?.period === null, 'MYR is a currency, not a /yr period');
+  assert(parseAmount('MOP 5000')?.mid === 5000 && parseAmount('MOP 5000')?.period === null, 'MOP is a currency, not a /mo period');
+  // Widened stripping must not turn prose into a number.
+  assert(parseAmount('UoP: 18000 - 25000 zł B2B: 20000 - 27000 zł') === null, 'two contract-scheme ranges in one string stay unparseable (#125)');
+  assert(parseAmount('competitive') === null, 'prose still null after the widened currency strip');
+
   // parseObservations
   const obs = parseObservations(OBS_FIXTURE);
   assert(obs.length === 10, `10 observations, got ${obs.length}`);
@@ -495,6 +600,10 @@ function selfTest() {
   const lowerReport = '# Eval: LowCo — Eng\n\n## Machine Summary\n\n```yaml\ncompany: "LowCo"\nrole: "Eng"\nadvertised_comp: "100k eur"\n```\n';
   const rLow = reportToObservation(lowerReport, '012', '2026-07-01');
   assert(rLow.observation.currency === 'UNKNOWN' && rLow.observation.parsed.mid === 100000, 'lowercase currency token -> UNKNOWN, amount still parsed');
+  // currency glued to each bound: no \b between "D" and "6" (#152)
+  const gluedReport = '# Eval: GlueCo — Eng\n\n## Machine Summary\n\n```yaml\ncompany: "GlueCo"\nrole: "Eng"\nadvertised_comp: "SGD6,500 - SGD9,500"\n```\n';
+  const rGlued = reportToObservation(gluedReport, '013', '2026-07-01');
+  assert(rGlued.observation.currency === 'SGD' && rGlued.observation.parsed.mid === 8000, 'currency glued to the number is detected, not UNKNOWN');
 
   // fold — golden test
   const apps = {
@@ -602,7 +711,46 @@ function selfTest() {
   assert(legacy.aggregates.byCompanyRole['#101'].company === 'report #101' && legacy.aggregates.byCompanyRole['#101'].role !== null,
     'legacy bucket display fields render without null');
 
-  console.log('salary-gap self-test OK (parser + report extraction + fold + aggregates + currency guard)');
+  // period guard at the fold: same shape as the currency guard, one rung up the
+  // unit ladder. #109 advertises an ANNUAL range; an actual logged as a bare
+  // monthly figure must NOT produce a -92% "gap" — and must say why it was skipped.
+  const periodApps = { '109': { company: 'AnnualCo', role: 'Eng' }, '110': { company: 'MonthlyCo', role: 'Eng' } };
+  const mkReport = (co, comp) => `# Eval\n\n## Machine Summary\n\n\`\`\`yaml\ncompany: "${co}"\nrole: "Eng"\nadvertised_comp: "${comp}"\n\`\`\`\n`;
+  const periodObs = [
+    { num: '109', ...reportToObservation(mkReport('AnnualCo', '110,000 - 200,000/year SGD'), '109', '2026-07-01').observation },
+    { num: '110', ...reportToObservation(mkReport('MonthlyCo', 'SGD 6,000-7,000/month'), '110', '2026-07-01').observation },
+    ...parseObservations([
+      '109\t2026-07-10\tactual\t12000\tSGD\tcontract\tbare figure — period not stated',
+      '110\t2026-07-10\tactual\t6800/month\tSGD\tcontract\tperiod stated in the amount cell',
+    ].join('\n')),
+  ];
+  const perResult = fold(periodObs, periodApps, null);
+  const p109 = perResult.applications.find(a => a.num === '109');
+  assert(p109.advertised.period === 'year' && p109.actual.period === null, '109 advertised annual, actual period unstated');
+  assert(p109.advToActPct === null, `109 annual-vs-unstated gap must be null, got ${p109.advToActPct}`);
+  assert(perResult.quality.periodMismatches.some(m => m.num === '109' && m.comparison === 'advertised-vs-actual' && m.periods[0] === 'year' && m.periods[1] === null),
+    '109 period mismatch reported, not silently dropped');
+  // ...and the log CAN state its period, in the amount cell — no new TSV column.
+  const p110 = perResult.applications.find(a => a.num === '110');
+  assert(p110.actual.period === 'month' && p110.actual.value === 6800, '110 actual carries /month from the amount cell');
+  assert(Math.abs(p110.advToActPct - 4.62) < 0.01, `110 month-vs-month gap computed, got ${p110.advToActPct}`);
+  assert(!perResult.quality.periodMismatches.some(m => m.num === '110'), '110 matching periods produce no mismatch');
+  // A currency mismatch is reported once, as a currency mismatch — not twice.
+  const bothBad = fold([
+    { num: '111', ...reportToObservation(mkReport('MixCo', '110,000 - 200,000/year USD'), '111', '2026-07-01').observation },
+    ...parseObservations('111\t2026-07-10\tactual\t12000\tGBP\tcontract\t'),
+  ], { '111': { company: 'MixCo', role: 'Eng' } }, null);
+  assert(bothBad.quality.currencyMismatches.some(m => m.num === '111'), '111 reported as a currency mismatch');
+  assert(!bothBad.quality.periodMismatches.some(m => m.num === '111'), '111 not double-reported as a period mismatch');
+
+  // profile.yml states its period as its own key, beside a target_range that is silent
+  const profPeriod = fold([], { '001': { company: 'A', role: 'B' } }, { amount: 'SGD6000-SGD9000', currency: 'SGD', period: 'month' });
+  assert(profPeriod.applications[0].desired.period === 'month' && profPeriod.applications[0].desired.value === 7500,
+    'profile compensation.period carried onto a target_range that does not state one');
+  assert(periodOf('monthly') === 'month' && periodOf('annually') === 'year' && periodOf('weekly') === null,
+    'periodOf maps profile.yml period keys, and refuses to guess at anything else');
+
+  console.log('salary-gap self-test OK (parser + report extraction + fold + aggregates + currency + period guards)');
 }
 
 // --- Real sources ---
@@ -645,7 +793,7 @@ function loadProfileDesired() {
     const profile = yaml.load(readFileSync(profilePath, 'utf-8'));
     const comp = profile?.compensation;
     if (!comp?.target_range) return null;
-    return { amount: String(comp.target_range), currency: comp.currency ? String(comp.currency) : null };
+    return { amount: String(comp.target_range), currency: comp.currency ? String(comp.currency) : null, period: periodOf(comp.period) };
   } catch {
     return null; // unreadable profile is a non-event here; doctor.mjs owns that complaint
   }
@@ -653,7 +801,7 @@ function loadProfileDesired() {
 
 // --- Output ---
 const fmtVal = (v) => (v >= 1000 && v % 500 === 0 ? `${v / 1000}k` : String(v));
-const fmtEff = (e) => (e ? `${fmtVal(e.value)} ${e.currency || ''} (${e.source}, ${e.date})`.replace('  ', ' ') : '—');
+const fmtEff = (e) => (e ? `${[fmtVal(e.value), e.currency].filter(Boolean).join(' ')}${e.period ? `/${e.period}` : ''} (${e.source}, ${e.date})` : '—');
 const fmtPct = (p) => (p === null || p === undefined ? '—' : `${p >= 0 ? '+' : ''}${p.toFixed(1)}%`);
 const daysOld = (date) => Math.max(0, Math.round((Date.now() - Date.parse(date)) / 86400000));
 
@@ -721,6 +869,12 @@ function printSummary(result) {
     for (const m of quality.currencyMismatches) console.log(`      #${m.num} ${m.comparison}: ${m.currencies[0]} vs ${m.currencies[1]}`);
   } else {
     console.log('  cross-currency comparisons skipped: none');
+  }
+  if (quality.periodMismatches.length) {
+    console.log(`  ⚠ ${quality.periodMismatches.length} pay-period mismatch${quality.periodMismatches.length === 1 ? '' : 'es'} skipped (monthly vs annual is not a gap — state the period in the amount, e.g. "8000/month"):`);
+    for (const m of quality.periodMismatches) console.log(`      #${m.num} ${m.comparison}: ${m.periods[0] ?? 'unstated'} vs ${m.periods[1] ?? 'unstated'}`);
+  } else {
+    console.log('  pay-period mismatches skipped: none');
   }
   const currencies = Object.entries(result.aggregates.byCurrency);
   if (currencies.length) {
