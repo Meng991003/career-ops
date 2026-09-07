@@ -437,10 +437,32 @@ function isPass(result, minScore) {
   return result.score >= minScore && !result.issues.some(i => i.severity === 'critical');
 }
 
+/**
+ * Why this exists: a PDF decoded as UTF-8 is mojibake that still audits cleanly
+ * enough to produce a *confident wrong answer* — no <html>, no headings, no
+ * email, so 65/100 with two "critical" findings that describe the caller's
+ * mistake, not the CV. Passing the rendered PDF instead of the HTML that made it
+ * is the obvious slip, so reject it at the boundary and name the file they meant.
+ *
+ * @param {Buffer} buf - Raw bytes of the target file.
+ * @returns {string|null} Human-readable problem, or null when the input is HTML.
+ */
+function describeNonHtmlInput(buf) {
+  if (buf.subarray(0, 5).toString('latin1') === '%PDF-') {
+    return 'is a PDF. This check reads the generated CV HTML (what you pass to generate-pdf.mjs), not its PDF output.';
+  }
+  // Any HTML the templates produce opens with <!DOCTYPE or <html well inside 4KB.
+  if (!/<[a-z!/]/i.test(buf.subarray(0, 4096).toString('utf-8'))) {
+    return 'does not look like HTML (no markup in the first 4KB).';
+  }
+  return null;
+}
+
 export {
   extractVisibleText,
   extractHeadings,
   auditAts,
+  describeNonHtmlInput,
   gradeFor,
   isPass,
   normalizeKeywords,
@@ -561,6 +583,13 @@ function runSelfTest() {
   );
   check('a bare year range is not counted as a phone', hasIssue(yearRangeOnly.issues, 'no phone number'));
   check('a real phone number is detected', !hasIssue(auditAts(buildCleanHtml()).issues, 'no phone number'));
+
+  // Input guard: the rendered PDF must be rejected, not silently scored. Without
+  // this, a PDF audits to a confident 65/100 whose two "critical" findings are
+  // artefacts of decoding binary as UTF-8.
+  check('a PDF target is rejected', /is a PDF/.test(describeNonHtmlInput(Buffer.from('%PDF-1.4\n%\xE2\xE3\xCF\xD3\n1 0 obj', 'latin1')) || ''));
+  check('a non-markup target is rejected', /does not look like HTML/.test(describeNonHtmlInput(Buffer.from('name,score\nada,10\n')) || ''));
+  check('real CV HTML is accepted', describeNonHtmlInput(Buffer.from(buildCleanHtml())) === null);
 
   // Email only inside a semantic <header> is unreachable ⇒ critical (a warning
   // alone would be ignored by isPass and let the CV pass anyway).
@@ -700,14 +729,20 @@ Keyword coverage (--keywords / --role) is advisory and never changes the score.`
     }
 
     const targetPath = isAbsolute(targetArg) ? targetArg : join(process.cwd(), targetArg);
-    let html;
+    let buf;
     try {
       if (!statSync(targetPath).isFile()) throw new Error('not a regular file');
-      html = readFileSync(targetPath, 'utf-8');
+      buf = readFileSync(targetPath);
     } catch (err) {
       console.error(`ERROR: cannot read target file: ${targetArg} (${err.code || err.message})`);
       process.exit(1);
     }
+    const inputProblem = describeNonHtmlInput(buf);
+    if (inputProblem) {
+      console.error(`ERROR: ${targetArg} ${inputProblem}`);
+      process.exit(1);
+    }
+    const html = buf.toString('utf-8');
     const result = auditAts(html, { keywords, role });
     const pass = isPass(result, minScore);
     const file = basename(targetPath);

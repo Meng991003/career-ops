@@ -106,6 +106,58 @@ export function parseLinkedInCards(html) {
   return jobs;
 }
 
+// ── Apply route ────────────────────────────────────────────────────
+//
+// The guest SEARCH cards carry no apply-method signal at all, so telling Easy
+// Apply from a company-site handoff costs one extra GET per job, on its own
+// /jobs/view/ page. There the apply control's tracking name states the route:
+//   public_jobs_apply-link-onsite  → Easy Apply, submitted inside LinkedIn
+//   public_jobs_apply-link-offsite → handoff to the company's own ATS
+const APPLY_DELAY_MS = 400;
+// ponytail: flat cap on lookups, since this is one request per job against an
+// endpoint that authwalls when pushed. Raise it if maxPages grows past ~8.
+const APPLY_MAX_LOOKUPS = 80;
+
+/**
+ * Classify one job-view page. Exported for unit testing.
+ * @param {string} html
+ * @returns {'easy'|'external'|'unknown'}
+ */
+export function parseApplyType(html) {
+  if (typeof html !== 'string') return 'unknown';
+  if (html.includes('apply-link-offsite')) return 'external';
+  if (html.includes('apply-link-onsite')) return 'easy';
+  return 'unknown';
+}
+
+/**
+ * Return `jobs` with an `applyType` field added. A job whose page fails to
+ * fetch is tagged 'unknown' rather than dropped — an outage must not silently
+ * shrink the list. Sequential with a delay, matching fetch() above.
+ *
+ * @param {Array<any>} jobs
+ * @param {{fetchText: (url: string, opts?: any) => Promise<string>}} ctx
+ * @param {number} [max]
+ */
+export async function annotateApplyType(jobs, ctx, max = APPLY_MAX_LOOKUPS) {
+  const out = [];
+  for (const job of jobs) {
+    if (out.length >= max) {
+      out.push({ ...job, applyType: 'unknown' });
+      continue;
+    }
+    let applyType = 'unknown';
+    try {
+      applyType = parseApplyType(await ctx.fetchText(job.url));
+    } catch (err) {
+      console.error(`linkedin-guest: apply-type lookup failed for ${job.url} — ${err.message}`);
+    }
+    out.push({ ...job, applyType });
+    await new Promise(resolve => setTimeout(resolve, APPLY_DELAY_MS));
+  }
+  return out;
+}
+
 /** @type {Provider} */
 export default {
   id: 'linkedin-guest',

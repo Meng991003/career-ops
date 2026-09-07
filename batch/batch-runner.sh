@@ -830,18 +830,65 @@ process_offer() {
     done
       # Strip HTML tags and count visible words to distinguish a real JD (hundreds
       # of words) from a JS shell (near zero visible text).
+      #
+      # JSON-LD first: on JS-rendered boards (foundit, and most schema.org-emitting
+      # ATS) the JD body lives ONLY inside a <script type="application/ld+json">
+      # JobPosting. Stripping scripts leaves navigation chrome, which can clear
+      # prefetch_min_words on its own — so the thin-content guard passes and the
+      # worker silently evaluates a nav menu as the job description. Prefer the
+      # JobPosting when one is present; otherwise fall back to visible text.
       jd_prefetch_words=$(node -e "
         const fs = require('fs');
+        const strip = (s) => s
+          .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+          .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+          .replace(/<[^>]+>/g, ' ')
+          .replace(/&(nbsp|#160|#xa0);/gi, ' ')
+          .replace(/&amp;/gi, '&')
+          .replace(/\s+/g, ' ')
+          .trim();
         try {
-          const text = fs.readFileSync(process.argv[1], 'utf-8')
-            .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-            .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-            .replace(/<[^>]+>/g, ' ')
-            .replace(/&(nbsp|#160|#xa0);/gi, ' ')
-            .replace(/\s+/g, ' ')
-            .trim();
+          const raw = fs.readFileSync(process.argv[1], 'utf-8');
+          let text = '';
+          for (const m of raw.matchAll(/<script[^>]*type=[\"']application\/ld\+json[\"'][^>]*>([\s\S]*?)<\/script>/gi)) {
+            let data;
+            try { data = JSON.parse(m[1].trim()); } catch { continue; }
+            const nodes = Array.isArray(data) ? data : (Array.isArray(data['@graph']) ? data['@graph'] : [data]);
+            const post = nodes.find(n => n && n['@type'] === 'JobPosting' && n.description);
+            if (!post) continue;
+            // experienceRequirements/qualifications/skills are SEPARATE JSON-LD
+            // fields, not part of description. Omitting them drops the
+            // years-of-experience bar entirely on boards that only express it
+            // there (foundit does), so an evaluator scores seniority blind and
+            // rates an 8-11-year req as a comfortable match for a 5-year
+            // candidate. Emit them before the prose.
+            const flat = (v) => Array.isArray(v) ? v.join(', ')
+              : (v && typeof v === 'object')
+                ? (v.monthsOfExperience != null
+                    ? (v.monthsOfExperience / 12) + ' years (' + v.monthsOfExperience + ' months)'
+                    : JSON.stringify(v))
+                : String(v);
+            const parts = [
+              post.title && ('Title: ' + post.title),
+              post.hiringOrganization?.name && ('Company: ' + post.hiringOrganization.name),
+              post.employmentType && ('Employment type: ' + [].concat(post.employmentType).join(', ')),
+              post.datePosted && ('Posted: ' + post.datePosted),
+              post.validThrough && ('Valid through: ' + post.validThrough),
+              post.baseSalary && ('Advertised salary: ' + JSON.stringify(post.baseSalary)),
+              post.experienceRequirements && ('EXPERIENCE REQUIRED: ' + flat(post.experienceRequirements)),
+              post.educationRequirements && ('Education required: ' + flat(post.educationRequirements)),
+              post.qualifications && ('Qualifications: ' + strip(flat(post.qualifications))),
+              post.skills && ('Skills listed: ' + flat(post.skills)),
+              post.industry && ('Industry: ' + flat(post.industry)),
+              '', strip(String(post.description)),
+              post.responsibilities && ('\nResponsibilities: ' + strip(flat(post.responsibilities))),
+            ].filter(Boolean);
+            text = parts.join('\n');
+            break;
+          }
+          if (!text) text = strip(raw);
           fs.writeFileSync(process.argv[1], text);
-          process.stdout.write(String(text.split(' ').filter(Boolean).length));
+          process.stdout.write(String(text.split(/\s+/).filter(Boolean).length));
         } catch (e) { process.stdout.write('0'); }
       " "$jd_file" 2>/dev/null) || jd_prefetch_words=0
       # Ensure jd_prefetch_words is always a non-negative integer. A non-integer

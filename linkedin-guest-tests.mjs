@@ -9,7 +9,9 @@
  * 2026-08-20). The endpoint returns HTML, not JSON.
  */
 
-import linkedinGuest, { parseLinkedInCards } from './providers/linkedin-guest.mjs';
+import linkedinGuest, {
+  parseLinkedInCards, parseApplyType, annotateApplyType,
+} from './providers/linkedin-guest.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -173,6 +175,38 @@ await expectThrow(
   const ctx = fakeCtx([FULL_PAGE, AUTHWALL]);
   const jobs = await linkedinGuest.fetch({ maxPages: 3 }, ctx);
   assert(jobs.length === 10, 'a later page going bad keeps what was already collected');
+}
+
+section('Apply route');
+
+assert(
+  parseApplyType('data-tracking-control-name="public_jobs_apply-link-onsite"') === 'easy',
+  'an onsite apply link is Easy Apply'
+);
+assert(
+  parseApplyType('data-tracking-control-name="public_jobs_apply-link-offsite"') === 'external',
+  'an offsite apply link is a company-site handoff'
+);
+assert(parseApplyType('<html>no apply control</html>') === 'unknown', 'neither marker is unknown');
+
+{
+  const pages = ['...apply-link-onsite...', '...apply-link-offsite...'];
+  const ctx = { fetchText: async () => pages.shift() ?? Promise.reject(new Error('boom')) };
+  const jobs = await annotateApplyType(
+    [{ url: 'a' }, { url: 'b' }, { url: 'c' }], ctx
+  );
+  assert(
+    jobs.map(j => j.applyType).join(',') === 'easy,external,unknown',
+    'each job is tagged, and a failed lookup is kept as unknown rather than dropped'
+  );
+}
+
+{
+  let calls = 0;
+  const ctx = { fetchText: async () => { calls++; return '...apply-link-onsite...'; } };
+  const jobs = await annotateApplyType([{ url: 'a' }, { url: 'b' }, { url: 'c' }], ctx, 2);
+  assert(calls === 2, 'the lookup cap is respected');
+  assert(jobs.length === 3 && jobs[2].applyType === 'unknown', 'jobs past the cap survive as unknown');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

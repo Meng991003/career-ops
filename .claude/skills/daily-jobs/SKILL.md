@@ -23,6 +23,18 @@ and inventing it would fabricate résumé facts (rule 4).
 
 Run everything from the career-ops project root.
 
+**Companion skills.** This one owns the gated apply cycle. `job-search` runs a
+fresh scan and presents the digest; `job-tailor` builds documents for a single
+role without the gates; `job-profile-sync` reconciles JobStreet and foundit
+against `cv.md`. Invoke those directly when the user wants only that part.
+
+**After editing any of these skills, run `npm run test-skills`.** It checks that
+every script, file and named export a skill tells an agent to use actually
+exists and is importable. Skills are written from memory and then trusted; this
+is what catches a command that was wrong the moment it was written, rather than
+mid-application. It verifies existence only — a wrong subcommand or flag on a
+real script still needs a human to read that script.
+
 ## Non-negotiable rules
 
 1. **Never submit an application without explicit approval for that specific
@@ -50,20 +62,33 @@ Computing the date any other way will look for the wrong file and make the
 routine report "digest missing" every morning even though the scan ran.
 
 Read the resulting `output/digest-<today>.html`. If it does not exist, the
-scheduled scan has not run; offer to run it now:
+scheduled scan has not run — use the **`job-search`** skill to produce one
+rather than reproducing its steps here. It also covers what to do when the user
+suspects a whole category of role is missing from the results.
 
-```bash
-npm run scan && node daily-digest.mjs
-```
+Summarise **each source section separately** in chat as a compact table: rank,
+role, company, salary (or "undisclosed"), posted date. The digest currently
+carries four sections — JobStreet, LinkedIn Easy Apply, LinkedIn apply-on-company-site,
+and foundit — each ranked independently so a source with fewer priced listings
+is not crowded out of one combined list. Say plainly how many roles were found
+per source and whether any source failed.
 
-Summarise the top 10 in chat as a compact table: rank, role, company, salary (or
-"undisclosed"), posted date. Say plainly how many roles were found and whether
-any source failed.
+**Numbering repeats across sections**, so a bare number is ambiguous. Always
+identify a role by source and rank together (for example "JS7" or "foundit 3"),
+and ask which the candidate means if they give only a digit.
 
 ## Step 2 — Let the candidate choose
 
 Ask which roles they want to pursue. Accept several. Do not evaluate anything
 they did not pick — evaluation is the expensive step.
+
+**Encourage two or three picks rather than one.** Most of the cost of an
+application is per-session, not per-job: browser setup, ATS quirks, and the
+answers that are missing from `data/answers.yml`. The second application of a
+session is markedly cheaper than the first, and cheaper still at the same
+employer or on the same ATS. Quality still governs which roles are worth
+picking — this is about batching the ones already worth doing, never about
+loosening the bar to fill a quota.
 
 ## Step 3 through Step 7 — Per-Job Cycle (Evaluate, Tailor, Apply)
 
@@ -93,13 +118,31 @@ For the role currently in this cycle:
 
 ### Step 4 — Generate material — GATE 1
 
-Generate the tailored CV and cover letter by running the tailoring workflows:
+Generate the tailored CV and cover letter. The **`job-tailor`** skill holds the
+full detail (spec format, verification, failure modes); the short form is:
 
-1. **Tailored CV:** Run `modes/pdf.md` to rewrite the CV using the job description
-   keywords and role-specific framing, then execute its final render step:
+1. **Tailored CV:** write a tailoring spec, then build and render it. Do NOT
+   hand-author the HTML — that was the single slowest part of Step 4.
+
    ```bash
-   node generate-pdf.mjs <input.html> output/cv-<candidate>-<company>-<date>.pdf [--format=letter|a4]
+   # 1. copy the nearest existing spec as a starting point
+   cp tailor/general.yml tailor/<company>.yml
+
+   # 2. edit it: summary, competencies, skills grouping, per-job bullets.
+   #    Anything you omit falls back to cv.md, so only write what CHANGES.
+
+   # 3. build + render
+   node build-cv.mjs tailor/<company>.yml --out /tmp/cv-<company>.html
+   node generate-pdf.mjs /tmp/cv-<company>.html output/cv-<candidate>-<company>-<date>.pdf --format=a4
    ```
+
+   `build-cv.mjs` takes every fact from `cv.md` (name, contact, job headings,
+   periods, locations, default bullets, education) so the spec cannot invent
+   résumé facts (rule 4). It throws if the spec names a company `cv.md` does not
+   contain, and it forces one skill line per row, which is a template bug you
+   would otherwise re-hit on every CV with a short skill line.
+
+   Run `node build-cv.mjs --self-check` if `cv.md`'s structure has changed.
 2. **Tailored cover letter:** Run `modes/cover.md` to draft the letter. When done,
    generate the PDF:
    ```bash
@@ -127,10 +170,11 @@ Only after gate 1 passes.
    - `scope: universal` → fill its `a` verbatim.
    - `scope: per-job` → draft fresh from this job's report. Never reuse a stale
      per-job answer. Apply `voice-dna.md`.
-   - **No match** → ask the candidate. Then persist it so it is never asked
-     again. Which of the two forms below you use depends on whether the answer
-     is job-independent. Both compute today's date using the candidate's
-     timezone (same as the digest filename).
+   - **No match** → **collect it as an unknown; do not ask yet.** Step 5 asks
+     for every unknown at once. When the answer comes back, persist it so it is
+     never asked again, using whichever of the two forms below applies. Both
+     compute today's date using the candidate's timezone (same as the digest
+     filename).
 
      **(a) Job-independent answer** (notice period, visa status, years of
      experience) → store the answer with `scope: universal`. It will be filled
@@ -158,8 +202,22 @@ Only after gate 1 passes.
 
      Choose `match` tokens that are specific enough not to collide with an
      existing entry.
-5. Fill the fields. State which `answers.yml` entry matched each one, so a
+5. **Resolve every field BEFORE asking anything.** Walk the whole list from
+   step 2, resolve each against `answers.yml`, and collect the unknowns. Then
+   ask for **all of them in a single message**, and persist each answer as it
+   comes back.
+
+   Asking one gap, filling, discovering the next gap, and asking again costs a
+   human round trip per gap. Enumerate first, ask once. If a required field has
+   no source anywhere (`answers.yml`, `config/profile.yml`, `cv.md`), it is an
+   unknown — do not start filling in the hope it resolves itself.
+
+6. Fill the fields. State which `answers.yml` entry matched each one, so a
    wrong match is visible rather than silent.
+
+   **Upload documents FIRST, then fill text fields.** Some ATSs re-render and
+   reload profile data from the account after an upload, wiping anything already
+   typed. Verify the full field list immediately before submitting.
 
 ### Step 6 — Review and submit — GATE 2
 
@@ -208,12 +266,19 @@ Recording is therefore an in-place **update**:
    a TSV. The application is already submitted; the honest fix is for the
    candidate to decide whether to run the evaluation now or record it by hand.
 
-Then regenerate the digest so it reflects the submission — the applied role
-drops out of the list and appears in the "Applied today" section:
+Then, **if this was the last job of the session**, regenerate the digest so it
+reflects the submission — the applied role drops out of the list and appears in
+the "Applied today" section:
 
 ```bash
 node daily-digest.mjs
 ```
+
+**Working through several jobs? Skip the regeneration until the last one.** Each
+run re-fetches every portal entry, so regenerating between jobs costs a full
+scan and risks a mid-cycle rate limit replacing the morning's list with a
+shorter one. The tracker edit above is what actually records the submission; the
+digest is only a view of it.
 
 Finally, give the candidate the digest path and a one-line summary of what was
 submitted.
@@ -232,3 +297,8 @@ submitted.
 | `answers.yml` fails to load | Stop. Report the error. Never proceed with an empty store — that would blank out real answers |
 | No tracker row to update in Step 7 | Stop and say so. Never add a row and never write a TSV (see Step 7) |
 | Digest shorter after regenerating | `node daily-digest.mjs` re-fetches every portal entry, so a mid-cycle rate limit can replace the morning's list with a shorter one. Check the failures box before reading it as a quiet market; the morning file is gone once overwritten |
+| An ATS button does nothing when clicked | Some ATSs bind handlers that ignore synthetic `ref` clicks. The tell is **zero network requests** and no DOM change after the click. Retry with a real coordinate click (`computer` + `coordinate`) before concluding anything is broken. Confirmed on SAP SuccessFactors (`career5.successfactors.eu`), where Apply, the upload tiles and the source dropdown all needed coordinate clicks while text fields and Expand/Apply accepted refs |
+| JobStreet shows **Apply** rather than **Quick apply** | The ad hands off to the employer's own ATS. Expect a different form, an account requirement, and none of the JobStreet answers prefilled |
+| An apply URL 301s to the site root | Check a second requisition on the same site before dropping the role. If every requisition does it, it is a site-wide routing quirk and **not** evidence this posting is closed. Confirmed on Sonova, where `/talentcommunity/apply/<id>/` 301s to `/` for every job and `/apply/<id>/` returns a byte-identical contentless shell |
+| Submit fails validation on a long answer | ATS text fields cap silently (SuccessFactors compensation field: 100 characters). Shorten while preserving meaning, then **re-verify every other field** — a failed submit can collapse sections and the values need checking, not assuming |
+| Filled fields blank out mid-form | An ATS may re-render and reload profile data from the account after a file upload, wiping typed values. Upload documents **first**, fill fields **second**, and verify the full field list immediately before submitting |
