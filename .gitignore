@@ -208,3 +208,7 @@ data/intake-state.json
 *.db
 *.db-wal
 *.db-shm
+
+# Python bytecode from the repo's .py helpers (build-covers.py, build-apply-notes.py).
+__pycache__/
+*.pyc
