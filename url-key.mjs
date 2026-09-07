@@ -75,6 +75,22 @@ export function normalizeUrl(raw) {
   u.hostname = u.hostname.toLowerCase();
   u.hash = '';                      // fragments never identify the posting
 
+  // Board-specific canonicalization: a LinkedIn posting is identified by the
+  // numeric id that ends /jobs/view/, and the SAME posting is served from every
+  // locale subdomain under any human-readable slug —
+  //   sg.linkedin.com/jobs/view/software-engineer-payments-at-stripe-4454544388
+  //   www.linkedin.com/jobs/view/4454544388/
+  // are one job. Generic normalization cannot see that (different host,
+  // different path), so an applied role kept reappearing in the daily digest as
+  // "new". This is the scheme-based rung the header note reserves for cases
+  // where we know the resource — the same justification as keeping gh_jid.
+  // Collapsing host + slug here cannot merge two distinct postings, because two
+  // different LinkedIn postings never share an id.
+  if (/(^|\.)linkedin\.com$/.test(u.hostname)) {
+    const view = u.pathname.match(/\/jobs\/view\/(?:.*-)?(\d{6,})\/?$/);
+    if (view) return `https://www.linkedin.com/jobs/view/${view[1]}`;
+  }
+
   // Drop tracking params, keep functional ones, sort for order-independence.
   const keep = [];
   for (const [k, v] of u.searchParams.entries()) {

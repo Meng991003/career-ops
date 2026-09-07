@@ -32,11 +32,15 @@ import yaml from 'js-yaml';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import jobstreet from './providers/jobstreet.mjs';
-import linkedinGuest from './providers/linkedin-guest.mjs';
+import linkedinGuest, { annotateApplyType } from './providers/linkedin-guest.mjs';
+import foundit from './providers/foundit.mjs';
 // scan.mjs guards its main() behind an import.meta.url check (scan.mjs:1031),
 // so importing it is safe — it does NOT trigger a scan. Verified: 14ms.
 import { buildSalaryFilter, buildTitleFilter, buildLocationFilter } from './scan.mjs';
 import { roleTokens } from './role-matcher.mjs';
+// Same canonical posting key merge-tracker.mjs dedups on, so the digest's
+// applied-exclusion and the tracker's dedup cannot drift apart.
+import { normalizeUrl as postingKey } from './url-key.mjs';
 
 const PROFILE_PATH = 'config/profile.yml';
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
@@ -44,10 +48,33 @@ const PIPELINE_PATH = 'data/pipeline.md';
 const APPLIED_PATH = 'data/applications.md';
 const BENCHMARKS_PATH = 'config/salary-benchmarks.yml';
 const OUTPUT_DIR = 'output';
-const TOP_N = 10;
+// Rows shown per source section. Resolution order, first wins:
+//   1. --top N on the command line (this run only)
+//   2. digest_top_n in portals.yml (persists, and the 9pm task picks it up)
+//   3. this default
+// Sections are ranked independently, so this is per-source, not a grand total:
+// --top 20 across four sections yields up to 80 rows.
+const DEFAULT_TOP_N = 10;
 
-const PROVIDERS = { jobstreet, 'linkedin-guest': linkedinGuest };
-const SOURCE_LABELS = { jobstreet: 'JobStreet', 'linkedin-guest': 'LinkedIn' };
+/**
+ * @param {string[]} argv raw process args
+ * @param {object} portals parsed portals.yml
+ * @returns {number} rows per section
+ */
+export function resolveTopN(argv = [], portals = {}) {
+  const i = argv.indexOf('--top');
+  const raw = i !== -1 ? argv[i + 1] : portals?.digest_top_n;
+  if (raw === undefined || raw === null || raw === '') return DEFAULT_TOP_N;
+  const n = Number(raw);
+  // Reject garbage loudly rather than silently falling back: a typo'd --top
+  // would otherwise look like it worked while quietly showing 10.
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`invalid rows-per-section "${raw}" — must be a positive integer`);
+  }
+  return n;
+}
+
+const PROVIDERS = { jobstreet, 'linkedin-guest': linkedinGuest, foundit };
 
 // ── Parsing the scan's durable files ────────────────────────────────
 
@@ -528,7 +555,7 @@ function parseFloorAnnual(profile) {
  * @param {number} [now]
  * @param {any} [benchmarks] — result of loadBenchmarks(), or null
  */
-export function rankJobs(jobs, profile, limit = TOP_N, now = Date.now(), benchmarks = null) {
+export function rankJobs(jobs, profile, limit = DEFAULT_TOP_N, now = Date.now(), benchmarks = null) {
   if (!Array.isArray(jobs)) return [];
   return jobs
     .map(j => {
@@ -763,6 +790,17 @@ export async function collectJobs({
   const seen = new Set();
   const jobs = [];
 
+  // Compare postings on their canonical key, not the raw string a provider
+  // happened to emit. The tracker records what the candidate actually clicked
+  // (www.linkedin.com/jobs/view/4454544388/) while the provider returns the
+  // locale+slug form (sg.linkedin.com/jobs/view/...-4454544388) — string
+  // equality never fired, so roles already Applied resurfaced as "new".
+  // `|| u` keeps url-key's NO-KEY-IS-NOT-A-KEY rule: an unparseable entry falls
+  // back to its own raw text rather than sharing an empty key with every other.
+  const key = (u) => postingKey(u) || u;
+  const appliedKeys = new Set([...applied].map(key));
+  const pendingKeys = new Set([...pending].map(key));
+
   for (const entry of portals?.tracked_companies || []) {
     if (entry.enabled === false) continue;
     const provider = providers[entry.provider];
@@ -772,15 +810,16 @@ export async function collectJobs({
     }
     try {
       for (const job of await provider.fetch(entry, ctx)) {
-        if (seen.has(job.url) || applied.has(job.url)) continue;
+        const jobKey = key(job.url);
+        if (seen.has(jobKey) || appliedKeys.has(jobKey)) continue;
         // pipeline.md stays authoritative on what counts as new. When it is
         // empty (first run, before any scan) fall through and show everything
         // that clears the filters below.
-        if (pending.size > 0 && !pending.has(job.url)) continue;
+        if (pendingKeys.size > 0 && !pendingKeys.has(jobKey)) continue;
         if (!titleOk(job.title)) continue;
         if (!locationOk(job.location)) continue;
         if (!salaryOk(job.salary)) continue;
-        seen.add(job.url);
+        seen.add(jobKey);
         jobs.push({ ...job, source: entry.provider });
       }
     } catch (err) {
@@ -825,12 +864,26 @@ async function main() {
   const benchmarks = loadBenchmarks();
 
   const date = digestDate(profile);
+  // LinkedIn's search cards say nothing about the apply route, so the two kinds
+  // arrive mixed. One extra GET per job splits them; a lookup that fails lands
+  // in 'unknown' and is shown with the company-site rows rather than dropped.
+  const linkedin = await annotateApplyType(
+    collected.filter(j => j.source === 'linkedin-guest'), ctx,
+  );
+
+  const topN = resolveTopN(process.argv.slice(2), portals);
+  const rank = jobs => rankJobs(jobs, profile, topN, undefined, benchmarks);
   // Rank each source independently — LinkedIn no longer competes for the same
   // combined top 10 that JobStreet's larger, priced volume always wins.
-  const sections = Object.keys(PROVIDERS).map(id => ({
-    label: SOURCE_LABELS[id] || id,
-    jobs: rankJobs(collected.filter(j => j.source === id), profile, TOP_N, undefined, benchmarks),
-  }));
+  const sections = [
+    { label: 'JobStreet', jobs: rank(collected.filter(j => j.source === 'jobstreet')) },
+    { label: 'LinkedIn — Easy Apply', jobs: rank(linkedin.filter(j => j.applyType === 'easy')) },
+    {
+      label: 'LinkedIn — apply on company site',
+      jobs: rank(linkedin.filter(j => j.applyType !== 'easy')),
+    },
+    { label: 'foundit', jobs: rank(collected.filter(j => j.source === 'foundit')) },
+  ];
   const html = renderDigest({
     sections,
     applied: pickAppliedToday(appliedRows, date),

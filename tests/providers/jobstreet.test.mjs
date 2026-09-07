@@ -33,7 +33,7 @@ try {
   };
   const parsed = parseJobstreetItem(sampleItem, 'https://id.jobstreet.com', 'FallbackCo');
   if (parsed && parsed.title === 'Facility Engineer'
-      && parsed.url === 'https://id.jobstreet.com/id/job/92996157'
+      && parsed.url === 'https://id.jobstreet.com/job/92996157'
       && parsed.company === 'PT YOFC International Indonesia'
       && parsed.location === 'Karawang, West Java'
       && parsed.postedAt != null) {
@@ -199,6 +199,51 @@ try {
   );
   if (badDataJobs.length === 0) pass('jobstreet.fetch() handles null data field');
   else fail(`jobstreet.fetch() should return empty for null data`);
+
+  // parseJobstreetSalary — salaryLabel is a display string; career-ops stores
+  // salary ANNUALIZED, and a hidden/ambiguous figure must be null, never zero.
+  const { parseJobstreetSalary } = jobstreetModule;
+  const SG = 'https://sg.jobstreet.com';
+  const salaryCases = [
+    ['$3,500 – $4,000 per month', SG, { min: 42000, max: 48000, currency: 'SGD' }],
+    ['$6,000 per month', SG, { min: 72000, max: 72000, currency: 'SGD' }],
+    ['$35 – $45 per hour', SG, { min: 72800, max: 93600, currency: 'SGD' }],
+    ['$90,000 – $120,000 per annum', SG, { min: 90000, max: 120000, currency: 'SGD' }],
+    ['', SG, null],
+    [undefined, SG, null],
+    ['$3,500 – $4,000 per fortnight', SG, null],       // unrecognized period
+    ['$3,500 per month', 'https://jobstreet.com', null], // ambiguous market
+    ['$3,500 per month', 'https://my.jobstreet.com', { min: 42000, max: 42000, currency: 'MYR' }],
+  ];
+  let salaryOk = true;
+  for (const [label, origin, want] of salaryCases) {
+    const got = parseJobstreetSalary(label, origin);
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+      fail(`parseJobstreetSalary(${JSON.stringify(label)}, ${origin}) → ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+      salaryOk = false;
+    }
+  }
+  if (salaryOk) pass('parseJobstreetSalary annualizes salaryLabel and returns null when hidden/ambiguous');
+
+  // parseJobstreetItem carries the salary through onto the canonical Job
+  const priced = parseJobstreetItem(
+    { id: '94400315', title: 'Senior Backend Engineer (.Net)', salaryLabel: '$5,500 – $7,000 per month' },
+    SG,
+    'QUESS',
+  );
+  if (priced?.salary?.max === 84000 && priced.salary.currency === 'SGD') {
+    pass('parseJobstreetItem populates salary from salaryLabel');
+  } else {
+    fail(`parseJobstreetItem should set salary from salaryLabel, got ${JSON.stringify(priced?.salary)}`);
+  }
+
+  const unpriced = parseJobstreetItem(
+    { id: '94451840', title: 'Software Engineer (C#)', salaryLabel: '' },
+    SG,
+    'Ambition',
+  );
+  if (unpriced && !('salary' in unpriced)) pass('parseJobstreetItem omits salary when the advertiser hid it');
+  else fail(`parseJobstreetItem should omit salary for an empty salaryLabel, got ${JSON.stringify(unpriced?.salary)}`);
 
 } catch (e) {
   fail(`jobstreet provider tests crashed: ${e.message}`);

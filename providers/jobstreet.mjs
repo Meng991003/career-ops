@@ -83,6 +83,73 @@ function deriveOrigin(apiUrl) {
   }
 }
 
+// Currency by market host. Hosts whose market is ambiguous (bare
+// jobstreet.com / www.jobstreet.com serve more than one) are deliberately
+// absent: a wrong currency is worse than no salary, and no salary is exactly
+// what these postings carried before this parser existed.
+const HOST_CURRENCY = {
+  'sg.jobstreet.com': 'SGD',
+  'my.jobstreet.com': 'MYR',
+  'id.jobstreet.com': 'IDR',
+  'www.jobstreet.co.id': 'IDR',
+  'jobstreet.co.id': 'IDR',
+  'hk.jobsdb.com': 'HKD',
+  'www.seek.com.au': 'AUD',
+  'www.seek.co.nz': 'NZD',
+};
+
+// `salaryLabel` is a display string, not structured data: "$3,500 – $4,000 per
+// month", "$6,000 per month", "$35 – $45 per hour", or "" when the advertiser
+// hid it. career-ops stores salary ANNUALIZED (see providers/foundit.mjs), so
+// the period suffix picks the multiplier. Year is tested first so "per annum"
+// can never fall through to a monthly reading.
+const PERIOD_MULTIPLIER = [
+  [/per\s+ann?um|per\s+year|annually|\/\s*(?:yr|year)\b/i, 1],
+  [/per\s+month|monthly|\/\s*(?:mo|month)\b/i, 12],
+  [/per\s+week|weekly/i, 52],
+  [/per\s+day|daily/i, 260],
+  [/per\s+hour|hourly|\/\s*(?:hr|hour)\b/i, 2080],
+];
+
+/**
+ * Annualized salary from a v5 `salaryLabel`, or null when the advertiser hid
+ * it, the period is unrecognized, or the host's currency is ambiguous.
+ *
+ * Returns null rather than a zero range: downstream, null means "show it,
+ * unpriced", while {min:0,max:0} would look like a real salary below any floor
+ * and silently drop the job (same rationale as parseFounditSalary).
+ *
+ * @param {string|undefined} label — item.salaryLabel
+ * @param {string} origin — scheme + hostname, used to pick the currency
+ * @returns {{min:number,max:number,currency:string}|null}
+ */
+export function parseJobstreetSalary(label, origin) {
+  const text = (label || '').trim();
+  if (!text) return null;
+
+  let currency;
+  try {
+    currency = HOST_CURRENCY[new URL(origin).hostname];
+  } catch {
+    return null;
+  }
+  if (!currency) return null;
+
+  const entry = PERIOD_MULTIPLIER.find(([re]) => re.test(text));
+  if (!entry) return null;
+  const multiplier = entry[1];
+
+  const figures = (text.match(/\d[\d,]*(?:\.\d+)?/g) || [])
+    .map((n) => Number(n.replace(/,/g, '')))
+    .filter((n) => Number.isFinite(n) && n > 0);
+  if (figures.length === 0) return null;
+
+  const max = Math.round(Math.max(...figures) * multiplier);
+  if (max <= 0) return null;
+  // A lone posted figure is a point value, matching parseFounditSalary.
+  return { min: Math.round(Math.min(...figures) * multiplier), max, currency };
+}
+
 // NaN-safe Date.parse
 function toEpochMs(value) {
   if (!value) return undefined;
@@ -126,7 +193,7 @@ export function parseJobstreetItem(item, origin, fallbackCompany) {
   // Build job URL from the job ID
   const jobId = (item.id || '').trim();
   if (!jobId) return null;
-  const url = `${origin}/id/job/${jobId}`;
+  const url = `${origin}/job/${jobId}`;
 
   // Validate URL hostname belongs to allowed set
   try {
@@ -141,8 +208,16 @@ export function parseJobstreetItem(item, origin, fallbackCompany) {
   const company = (item.advertiser?.description || item.companyName || fallbackCompany || '').trim();
   const location = (item.locations?.[0]?.label || '').trim();
   const postedAt = toEpochMs(item.listingDate);
+  const salary = parseJobstreetSalary(item.salaryLabel, origin);
 
-  return { title, url, company, location, ...(postedAt != null ? { postedAt } : {}) };
+  return {
+    title,
+    url,
+    company,
+    location,
+    ...(postedAt != null ? { postedAt } : {}),
+    ...(salary ? { salary } : {}),
+  };
 }
 
 /**
