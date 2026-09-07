@@ -1,9 +1,19 @@
 // Pure heuristic extraction of contact fields from resume plain text.
 // Real-world resumes are often two-column / label-based; pdf-parse linearizes
 // them so contact info sits on "Phone:"/"Email:" lines and the name can appear
-// well below section headers. So we prefer labeled values, strip a spurious
-// leading "www." from emails, and skip section headers + skill phrases when
-// guessing the name. Everything stays best-effort — the user reviews before saving.
+// well below section headers. So we prefer labeled values and skip section
+// headers + skill phrases when guessing the name. Everything stays best-effort —
+// the user reviews before saving.
+//
+// A leading "www." in an email address is PRESERVED, deliberately. It used to be
+// stripped as a website token that pdf-parse had glued onto the local part, but
+// the heuristic cannot tell that apart from a real address: "www.foo" is a valid
+// RFC 5322 dot-atom local part, and a real user's address here begins exactly
+// that way, so the strip silently corrupted it on every extraction. The glue
+// case it was meant to rescue does not survive stripping anyway —
+// "www.site.com" + "foo@bar.com" linearizes to "www.site.comfoo@bar.com", which
+// strips to "site.comfoo@bar.com" and is still wrong. Return what the text says
+// and let the user fix it in review; do not re-add the strip.
 
 const EMAIL = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/;
 const PHONE = /\+?\d[\d\s().-]{5,}\d/;
@@ -26,12 +36,11 @@ const SECTION_HEADERS = new Set([
 
 function firstMatch(re, text) { const m = text.match(re); return m ? m[0].trim() : ''; }
 
-// Normalize a candidate email: re-match the strict pattern and drop a leading
-// "www." that a preceding website token can glue onto the local part.
+// Normalize a candidate email: re-match the strict pattern so a surrounding
+// token cannot widen the value. A leading "www." is kept — see the header note.
 function cleanEmail(candidate) {
   const m = String(candidate).match(EMAIL);
-  if (!m) return '';
-  return m[0].replace(/^www\./i, '').trim();
+  return m ? m[0].trim() : '';
 }
 
 function extractEmail(text) {

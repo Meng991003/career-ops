@@ -31,21 +31,33 @@ eq(s.name, '', 'no confident name → empty');
 
 // Two-column / label-based resume linearized by pdf-parse: contact block with
 // labels, a section header before the name, skills phrases, then the name.
+// Fixtures are synthetic. They used to carry a real candidate's address, phone,
+// email and name; this file is tracked and `origin` is a fork of a public repo.
 const labeled = `PROFESSIONAL SUMMARY
 Dynamic full stack engineer with broad experience across teams and systems.
 CONTACT
-Address: Cheras, 14 50400
-Phone: +60182504378
-Email: www.meng705@gmail.com
+Address: Someplace, 14 50400
+Phone: +60111234567
+Email: www.sample123@example.com
 SKILLS
 Full-stack development
 Team collaboration
-WAI CHUN MENG
+ALEX SAMPLE
 Fullstack Software Engineer`;
 const L = extractFields(labeled);
-eq(L.email, 'meng705@gmail.com', 'strips spurious www. from email');
-eq(L.phone, '+60182504378', 'prefers the labeled Phone: line over an address digit run');
-eq(L.name, 'WAI CHUN MENG', 'skips section headers + skill phrases to find the name');
+// A leading "www." is part of the local part, not a glued website token: it must
+// survive extraction. Stripping it corrupted a real user's address on every run,
+// and the glue case it was meant to rescue is unsalvageable anyway (see the
+// header note in lib/resume-fields.mjs).
+eq(L.email, 'www.sample123@example.com', 'keeps a leading www. in the email local part');
+eq(L.phone, '+60111234567', 'prefers the labeled Phone: line over an address digit run');
+eq(L.name, 'ALEX SAMPLE', 'skips section headers + skill phrases to find the name');
+
+// The glue shape the old strip targeted. Whatever comes back is wrong either
+// way, so the contract is only that it does not throw and does not silently
+// hand back a plausible-looking address.
+const glued = extractFields('Portfolio www.site.comfoo@bar.com');
+eq(glued.email, 'www.site.comfoo@bar.com', 'glued website+email is returned verbatim for the user to correct');
 
 eq(extractFields('').email, '', 'empty input is safe');
 eq(extractFields(null).name, '', 'null input is safe');
