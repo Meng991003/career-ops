@@ -36,16 +36,23 @@ import linkedinGuest, { annotateApplyType } from './providers/linkedin-guest.mjs
 import foundit from './providers/foundit.mjs';
 // scan.mjs guards its main() behind an import.meta.url check (scan.mjs:1031),
 // so importing it is safe — it does NOT trigger a scan. Verified: 14ms.
+import { annotateApplyRoute } from './apply-route.mjs';
 import { buildSalaryFilter, buildTitleFilter, buildLocationFilter } from './scan.mjs';
 import { roleTokens } from './role-matcher.mjs';
 // Same canonical posting key merge-tracker.mjs dedups on, so the digest's
 // applied-exclusion and the tracker's dedup cannot drift apart.
 import { normalizeUrl as postingKey } from './url-key.mjs';
+// Repost detection reuses detect-reposts.mjs's own primitives rather than
+// company-history.mjs's loadRepostClusters: detect-reposts owns the logic, and
+// depending on a sibling report script would invert the dependency for a
+// four-line loader.
+import { parseScanHistory, detectReposts, loadAggregatorCompanies } from './detect-reposts.mjs';
 
 const PROFILE_PATH = 'config/profile.yml';
 const PORTALS_PATH = process.env.CAREER_OPS_PORTALS || 'portals.yml';
 const PIPELINE_PATH = 'data/pipeline.md';
 const APPLIED_PATH = 'data/applications.md';
+const SCAN_HISTORY_PATH = 'data/scan-history.tsv';
 const BENCHMARKS_PATH = 'config/salary-benchmarks.yml';
 const OUTPUT_DIR = 'output';
 // Rows shown per source section. Resolution order, first wins:
@@ -604,8 +611,69 @@ function salaryCell(job) {
   return '<span class="muted">salary undisclosed</span>';
 }
 
+/**
+ * Map every URL in a repost cluster to that cluster, keyed on the same
+ * canonical posting key collectJobs dedups on — scan-history.tsv stores
+ * whatever the provider emitted the day the row was appended, which is not
+ * always the string today's fetch returns.
+ *
+ * Absence from this map is NOT evidence of a fresh opening. detectReposts
+ * requires the same role on 2+ distinct URLs across 2+ distinct scan dates, so
+ * a posting first seen today is structurally unflaggable, and history only
+ * reaches back as far as scan-history.tsv does. The footer states this, because
+ * a bare dash in the column otherwise reads as a clean bill of health.
+ */
+export function buildRepostIndex(historyPath = SCAN_HISTORY_PATH, portalsPath = PORTALS_PATH) {
+  if (!existsSync(historyPath)) return new Map();
+  const clusters = detectReposts(
+    parseScanHistory(readFileSync(historyPath, 'utf-8')),
+    undefined,
+    undefined,
+    loadAggregatorCompanies(portalsPath),
+  );
+  const index = new Map();
+  for (const cluster of clusters) {
+    for (const appearance of cluster.appearances) {
+      const key = postingKey(appearance.url) || appearance.url;
+      if (key) index.set(key, cluster);
+    }
+  }
+  return index;
+}
+
+/**
+ * The repost cell. Three distinct states, deliberately: a hit, a checked miss,
+ * and "the check never ran" — collapsing the last two into one dash would let a
+ * missing scan-history.tsv render as every row being clean.
+ */
+function repostCell(job, index) {
+  if (!index || index.size === 0) return '<span class="muted" title="No scan history available - repost check did not run.">n/a</span>';
+  const cluster = index.get(postingKey(job.url) || job.url);
+  if (!cluster) return '<span class="muted">&mdash;</span>';
+  const title = `Re-listed ${cluster.repostCount}x on distinct URLs between `
+    + `${cluster.firstSeen} and ${cluster.lastSeen} (${cluster.daysSpan}d span). `
+    + 'An evergreen or re-opened requisition, not necessarily a fresh opening.';
+  return `<span class="repost" title="${escapeHtml(title)}">${cluster.repostCount}&times; / ${cluster.daysSpan}d</span>`;
+}
+
+/**
+ * The apply-route cell. Same three-state discipline as repostCell: a confirmed
+ * block, a confirmed-clear, and "not checked" stay distinct, because rendering
+ * an unchecked row as clear is exactly how a dead channel reaches a tailored CV.
+ */
+function applyRouteCell(job) {
+  if (job.applyRoute === 'gated') {
+    return '<span class="gated" title="This posting\'s own apply URL points at MyCareersFuture, which requires Singpass (a Singapore NRIC/FIN) to submit. Confirmed from the listing, not inferred.">Singpass</span>';
+  }
+  if (job.applyRoute === 'likely-gated') {
+    return '<span class="gated" title="This advertiser posts on MyCareersFuture, so this board ad is likely a mirror whose Apply button hands off to Singpass. INFERRED from the advertiser, not from this posting - check the apply button before writing a tailored CV.">Singpass?</span>';
+  }
+  if (job.applyRoute === 'open') return '<span class="muted">&mdash;</span>';
+  return '<span class="muted" title="Apply route not checked.">n/a</span>';
+}
+
 /** The shared table markup, reused by every source section. */
-function renderJobsTable(jobs) {
+function renderJobsTable(jobs, repostIndex) {
   const rows = jobs.map((j, i) => `      <tr>
         <td class="num">${i + 1}</td>
         <td><a href="${escapeHtml(j.url)}" target="_blank" rel="noopener">${escapeHtml(j.title)}</a></td>
@@ -613,12 +681,14 @@ function renderJobsTable(jobs) {
         <td>${escapeHtml(j.location)}</td>
         <td>${salaryCell(j)}</td>
         <td>${j.postedAt ? new Date(j.postedAt).toISOString().slice(0, 10) : '<span class="muted">—</span>'}</td>
+        <td>${repostCell(j, repostIndex)}</td>
+        <td>${applyRouteCell(j)}</td>
         <td class="num">${j.score}</td>
       </tr>`).join('\n');
 
   return `<table>
       <thead>
-        <tr><th>#</th><th>Role</th><th>Company</th><th>Location</th><th>Salary</th><th>Posted</th><th>Triage</th></tr>
+        <tr><th>#</th><th>Role</th><th>Company</th><th>Location</th><th>Salary</th><th>Posted</th><th>Repost</th><th>Route</th><th>Triage</th></tr>
       </thead>
       <tbody>
 ${rows}
@@ -628,11 +698,11 @@ ${rows}
 
 /** One source section: its own heading/count, its own top-10 table (or, with
  * zero jobs, a worded empty state instead of a blank table). */
-function renderSection({ label, jobs }) {
+function renderSection({ label, jobs }, repostIndex) {
   const list = jobs || [];
   const body = list.length === 0
     ? `<p class="empty">No ${escapeHtml(label)} roles today. Nothing matched the filters that you have not already applied to.</p>`
-    : renderJobsTable(list);
+    : renderJobsTable(list, repostIndex);
   return `<h2>${escapeHtml(label)} (${list.length})</h2>
   ${body}`;
 }
@@ -654,11 +724,14 @@ function isBenchmarksStale(benchmarks, date) {
  * @param {{
  *   sections: Array<{label: string, jobs: Array<any>}>, applied: Array<any>,
  *   failures: string[], date: string, benchmarks?: any,
+ *   repostIndex?: Map<string, any>,
  * }} args
  * @returns {string}
  */
-export function renderDigest({ sections, applied, failures, date, benchmarks }) {
-  const body = (sections || []).map(renderSection).join('\n  ');
+export function renderDigest({ sections, applied, failures, date, benchmarks, repostIndex }) {
+  // Explicit arrow, not `.map(renderSection)`: map passes the element INDEX as the
+  // second argument, which would arrive as repostIndex.
+  const body = (sections || []).map(s => renderSection(s, repostIndex)).join('\n  ');
 
   const crossSectionNote = (sections || []).length > 1
     ? `<p class="note">Scores are not comparable across the sections above: LinkedIn never
@@ -726,6 +799,7 @@ ${failures.map(f => `        <li>${escapeHtml(f)}</li>`).join('\n')}
   .empty { color: var(--muted); padding: 2rem 0; }
   .applied { padding-left: 1.1rem; }
   .est { color: var(--muted); font-style: italic; }
+  .repost { color: var(--warn-fg); background: var(--warn-bg); padding: .1rem .35rem; border-radius: 4px; white-space: nowrap; }
   .note { color: var(--muted); font-size: .85rem; margin: 0 0 1rem; }
   .note.warn-note { color: var(--warn-fg); background: var(--warn-bg); padding: .6rem .8rem; border-radius: 6px; }
   footer { margin-top: 2.5rem; color: var(--muted); font-size: .85rem; border-top: 1px solid var(--line); padding-top: 1rem; }
@@ -746,6 +820,11 @@ ${failures.map(f => `        <li>${escapeHtml(f)}</li>`).join('\n')}
     <p>Jobs with no posted salary pass the filter by design and are marked
     &ldquo;salary undisclosed&rdquo; &mdash; roughly two thirds of listings post nothing,
     so the floor is unverified for those.</p>
+    <p><strong>Repost</strong> flags a role re-listed on 2+ distinct URLs across 2+ separate
+    scans &mdash; an evergreen or re-opened requisition rather than a fresh opening. A dash is
+    <strong>not</strong> a clean bill of health: a posting first seen today cannot be flagged
+    yet, and detection reaches back only as far as <code>data/scan-history.tsv</code> does.
+    <code>n/a</code> means no scan history was available and the check did not run.</p>
   </footer>
 </main>
 </body>
@@ -884,12 +963,20 @@ async function main() {
     },
     { label: 'foundit', jobs: rank(collected.filter(j => j.source === 'foundit')) },
   ];
+  // Apply-route check runs AFTER ranking, on the shown rows only: it costs one
+  // cached MCF lookup per distinct advertiser, and the question it answers
+  // ("can this candidate actually apply?") only matters for rows they will read.
+  for (const section of sections) {
+    await annotateApplyRoute(section.jobs, { fetchJson: url => ctx.fetchJson(url) });
+  }
+  const repostIndex = buildRepostIndex();
   const html = renderDigest({
     sections,
     applied: pickAppliedToday(appliedRows, date),
     failures,
     date,
     benchmarks,
+    repostIndex,
   });
 
   if (!existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -899,6 +986,7 @@ async function main() {
   console.log(`Digest written: ${outPath}`);
   console.log(`  candidates: ${collected.length}`);
   for (const s of sections) console.log(`  ${s.label}: shown ${s.jobs.length}`);
+  console.log(`  repost-flagged URLs known: ${repostIndex.size}`);
   if (failures.length) console.log(`  failed sources: ${failures.length}`);
 }
 

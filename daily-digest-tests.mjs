@@ -12,7 +12,7 @@ import yaml from 'js-yaml';
 import {
   scoreJob, rankJobs, renderDigest, parseAppliedUrls, parseAppliedRows,
   pickAppliedToday, parsePendingUrls, digestDate, collectJobs, skillTokens,
-  loadBenchmarks, classifyTitle, lookupBucket,
+  loadBenchmarks, classifyTitle, lookupBucket, buildRepostIndex,
 } from './daily-digest.mjs';
 // scan.mjs guards its main() behind an import.meta.url check, so importing it
 // here (for buildSalaryFilter, to prove the hard filter never sees an
@@ -808,6 +808,54 @@ const noBenchmarksHtml = renderDigest({
   applied: [], failures: [], date: '2026-08-20', benchmarks: null,
 });
 assert(!/refresh_after/i.test(noBenchmarksHtml), 'no benchmarks at all -> no stale note either');
+
+
+section('repost flag (buildRepostIndex + renderDigest column)');
+{
+  const dir = mkdtempSync(join(tmpdir(), 'repost-'));
+  const history = join(dir, 'scan-history.tsv');
+  const portals = join(dir, 'portals.yml');
+  writeFileSync(portals, 'tracked_companies: []\n');
+  // Same role, two distinct URLs, two distinct scan dates => one cluster.
+  writeFileSync(history, [
+    'url\tfirst_seen\tportal\ttitle\tcompany\tstatus\tlocation',
+    'https://sg.linkedin.com/jobs/view/software-engineer-at-acme-4463591545?trk=x\t2026-08-20\tlinkedin-guest-api\tSoftware Engineer\tAcme Inc\tadded\tSingapore',
+    'https://sg.linkedin.com/jobs/view/software-engineer-at-acme-4470112233\t2026-09-09\tlinkedin-guest-api\tSoftware Engineer\tAcme Inc\tadded\tSingapore',
+    'https://sg.linkedin.com/jobs/view/data-analyst-at-solo-4499887766\t2026-09-09\tlinkedin-guest-api\tData Analyst\tSolo Ltd\tadded\tSingapore',
+  ].join('\n') + '\n');
+
+  const index = buildRepostIndex(history, portals);
+  assert(index.size === 2, 'both URLs of a repost cluster are indexed');
+  assert(!index.has('https://www.linkedin.com/jobs/view/4499887766'),
+    'a role seen once is not a repost');
+
+  // Keyed on the canonical posting key, so the tracking param does not matter.
+  const reposted = { title: 'Software Engineer', company: 'Acme Inc', location: 'Singapore',
+    url: 'https://www.linkedin.com/jobs/view/4463591545/', score: 50 };
+  const fresh = { title: 'Data Analyst', company: 'Solo Ltd', location: 'Singapore',
+    url: 'https://sg.linkedin.com/jobs/view/data-analyst-at-solo-4499887766', score: 40 };
+
+  const flagged = renderDigest({
+    sections: [{ label: 'LinkedIn', jobs: [reposted, fresh] }],
+    applied: [], failures: [], date: '2026-09-09', repostIndex: index,
+  });
+  assert(flagged.includes('<th>Repost</th>'), 'the table has a Repost column');
+  assert(/class="repost"[^>]*>2&times;/.test(flagged), 'a reposted role renders its count');
+  assert((flagged.match(/class="repost"/g) || []).length === 1,
+    'only the reposted role is flagged, not every row in the section');
+
+  // No index => "n/a", never a dash that would read as "checked, clean".
+  const unchecked = renderDigest({
+    sections: [{ label: 'LinkedIn', jobs: [reposted] }],
+    applied: [], failures: [], date: '2026-09-09',
+  });
+  assert(unchecked.includes('>n/a<'), 'an absent scan history renders n/a, not a clean dash');
+  assert(!unchecked.includes('class="repost"'), 'nothing is flagged when the check did not run');
+
+  assert(buildRepostIndex(join(dir, 'missing.tsv'), portals).size === 0,
+    'a missing scan history yields an empty index rather than throwing');
+}
+
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);
