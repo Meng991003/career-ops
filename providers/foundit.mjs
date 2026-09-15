@@ -22,6 +22,8 @@
 
 /** @typedef {import('./_types.js').Provider} Provider */
 
+import { classifyApplyUrl } from '../apply-route.mjs';
+
 const SEARCH_URL = 'https://www.foundit.sg/middleware/jobsearch';
 const SITE_ORIGIN = 'https://www.foundit.sg';
 const ALLOWED_FOUNDIT_HOSTS = new Set(['www.foundit.sg', 'foundit.sg']);
@@ -93,6 +95,14 @@ export function parseFounditItem(item) {
 
   const salary = parseFounditSalary(item);
 
+  // Apply route, exact and free: foundit is an aggregator and hands us the
+  // destination it will send an applicant to. When that is mycareersfuture.gov.sg
+  // the posting is Singpass-gated and unapplicable without a Singapore NRIC/FIN,
+  // which is worth knowing BEFORE a tailored CV is written for it. Records
+  // scraped from MCF (`jobSource: "SCRAPPING"`, `quickApplyJob: 0`) are the
+  // common case. See apply-route.mjs for why jobstreet needs inference instead.
+  const applyRoute = classifyApplyUrl(item.applyUrl || item.redirectUrl);
+
   return {
     title,
     url,
@@ -100,6 +110,7 @@ export function parseFounditItem(item) {
     location,
     ...(postedAt != null ? { postedAt } : {}),
     ...(salary ? { salary } : {}),
+    ...(applyRoute !== 'unknown' ? { applyRoute } : {}),
   };
 }
 
