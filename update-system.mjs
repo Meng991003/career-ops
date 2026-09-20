@@ -1753,7 +1753,9 @@ export function stagingFileList(pathsToStage, preserved = [], ref = 'FETCH_HEAD'
  * legitimately begin or end with a space and trimming would rewrite it.
  *
  * @param {string[]} owned
- * @param {string[]} [preserved] exact paths the update leaves to the user
+ * @param {string[]} [preserved] paths the update leaves to the user. A trailing
+ *   `/` makes an entry a directory prefix covering the files under it; anything
+ *   else matches exactly.
  * @param {(...args: string[]) => string} [run] raw git runner; defaults to ROOT
  * @returns {string[]} staged paths the update does not own (empty ⇒ safe to commit the index)
  */
@@ -1775,13 +1777,29 @@ export function stagedPathsOutside(owned, preserved = [], run = (...args) => git
   }
   // Preservation wins over ownership, hence the check BEFORE the owned lookups:
   // being inside an owned directory is exactly the case that would otherwise
-  // claim a preserved file. Exact paths only — the preserved list comes from
-  // `git diff --name-only` / `git ls-files`, which never emit directories.
-  const preservedFiles = new Set(preserved);
+  // claim a preserved file.
+  //
+  // A `dir/` entry covers the files under it. Most of this list is exact paths
+  // — it comes from `git diff --name-only` / `git ls-files`, which never emit
+  // directories — but apply() also folds in config/local-paths.txt, and a
+  // declaration may be a directory. Matching those exactly meant a staged
+  // `providers/my-own-board.mjs` under a declared `providers/` fell through to
+  // the owned lookups, where the `providers/` OWNED entry claimed it: the guard
+  // reported nothing unrelated, the bare index commit was selected, and the
+  // user's staged work went in under "chore: auto-update system files". Same
+  // shape as the #2337 case below it, reached through the declaration instead.
+  const preservedFiles = new Set();
+  const preservedDirs = [];
+  for (const entry of preserved) {
+    if (entry.endsWith('/')) preservedDirs.push(entry);
+    else preservedFiles.add(entry);
+  }
+  const isPreserved = (path) =>
+    preservedFiles.has(path) || preservedDirs.some((dir) => path.startsWith(dir));
 
   return staged.split('\0')
     .filter(path => path !== '')
-    .filter(path => preservedFiles.has(path)
+    .filter(path => isPreserved(path)
       || (!files.has(path) && !dirs.some(dir => path.startsWith(dir))));
 }
 
@@ -2616,9 +2634,14 @@ async function apply() {
       // `providers/acme.mjs`) — so strip the exclusions out and pass the
       // preserved list separately, where preservation outranks ownership.
       const ownedPaths = pathsToStage.filter((spec) => !spec.startsWith(EXCLUDE_PATHSPEC_PREFIX));
+      // keptFromCheckout, not preservedPaths: a config/local-paths.txt
+      // declaration is a statement that the file is the fork's, and a file the
+      // updater must not WRITE is equally a file it must not COMMIT. Passing
+      // only preservedPaths left a staged declared file classified as
+      // updater-owned and swept into the auto-update commit.
       const unrelated = stagedPathsOutside(
         [...ownedPaths, ...materializedSkillEntrypoints],
-        preservedPaths,
+        keptFromCheckout,
       );
       usedIndexCommit = unrelated.length === 0;
       if (usedIndexCommit) {
