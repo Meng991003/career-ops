@@ -376,13 +376,19 @@ function canary() {
  *  between them. That is the reported shape: an install that has updated once
  *  before, which is every install.
  *
- *  Three assertions:
+ *  Assertions, and why byte-identity is not one of the load-bearing ones:
  *    - both applies exit 0 — a declared `dir/` reached the checkout as both a
  *                      path and its own `:(exclude)`, which cancel out; git
  *                      exits 1 and apply rethrew it, aborting the update.
- *    - byte-identical — the prune must not delete the declared file, and must
- *                      not depend on it having uncommitted edits (committing
- *                      your work is what used to make it deletable).
+ *    - never pruned  — the direct signal. On the unfixed wiring apply prints
+ *                      `Pruned stale system file: providers/my-own-board.mjs`,
+ *                      and only THEN does the SAFETY VIOLATION check notice a
+ *                      user file moved and roll the whole update back. So the
+ *                      file IS byte-identical afterwards, restored by a net
+ *                      that also aborts every future update. Asserting on the
+ *                      prune line names the defect; asserting on the bytes
+ *                      alone would read green.
+ *    - byte-identical — kept anyway, as the backstop if that net ever changes.
  */
 function forkUnderSystemDirScenario(baseSha, oldTag, ok, commit) {
   const DECLARED_DIR = 'providers/';
@@ -422,10 +428,12 @@ function forkUnderSystemDirScenario(baseSha, oldTag, ok, commit) {
     const exitCode = first.exitCode || second.exitCode;
     const output = `${first.output}${second.output}`;
 
+    const pruned = output.includes(`Pruned stale system file: ${FORK_FILE}`);
+    ok(!pruned, `the stale-file prune leaves the declared file alone (${FORK_FILE})`);
     const survived = existsSync(join(install, FORK_FILE)) && sha256(join(install, FORK_FILE)) === before;
     ok(survived, `committed fork-local file under a declared directory is byte-identical after a SECOND apply: ${FORK_FILE}`);
 
-    if ((exitCode !== 0 || !survived) && output) {
+    if ((exitCode !== 0 || pruned || !survived) && output) {
       console.log('  --- apply output tail [local-paths/dir] ---');
       console.log(output.split('\n').slice(-20).join('\n'));
     }
