@@ -620,27 +620,34 @@ export function localUserPaths(root = ROOT) {
     if (segments.includes('.')) {
       reject(path, 'paths must be written plainly, with no "." segment (use "merge-tracker.mjs", not "./merge-tracker.mjs")');
     }
-    // Warned, not refused. This check assumed a SYSTEM_PATHS match proves
-    // upstream ships the path, and it does not:
+    // A SYSTEM_PATHS collision splits in two, because the two entry shapes
+    // make different claims.
     //
-    //   - a directory entry is a wildcard, so `providers/` covers upstream's
-    //     greenhouse.mjs and a provider that exists only in a fork alike;
-    //   - even an exact entry can be stale, naming a file the fetched tree no
-    //     longer has (the checkout loop already tolerates exactly that, calling
-    //     it "a path genuinely absent upstream").
+    // An EXACT entry is upstream saying "we ship this file". Declaring it is a
+    // statement the updater cannot honour and evaluate at once, so it still
+    // fails closed — unchanged, and what --local-paths pins.
     //
-    // So the refusal fired on precisely the files this mechanism exists for —
-    // a fork's own provider, skill or doc under an owned prefix — leaving them
-    // undeclarable, after which staleSystemFiles() deleted them as though
-    // upstream had dropped them. Answering "does upstream ship this?" needs the
-    // fetched tree, which this function cannot reach: it is also called by
-    // validate-system-paths-coverage.mjs, offline. Warning keeps the original
-    // rationale, which was about *silence* rather than refusal: fork a
-    // genuinely shipped file and you are told it stops updating.
-    const collision = SYSTEM_PATHS.find((sys) =>
-      sys.endsWith('/') ? path.startsWith(sys) : path === sys,
-    );
-    if (collision) underSystemPath.push({ path, collision });
+    // A `dir/` entry is a WILDCARD and proves nothing about any one file under
+    // it: `providers/` covers upstream's greenhouse.mjs and a provider that
+    // exists only in a fork alike. Refusing there fired on precisely the files
+    // this mechanism exists for — a fork's own provider, skill or doc under an
+    // owned prefix — leaving them undeclarable, after which staleSystemFiles()
+    // deleted them as though upstream had dropped them. Answering "does
+    // upstream ship THIS file?" needs the fetched tree, which this function
+    // cannot reach: it is also called by validate-system-paths-coverage.mjs,
+    // offline. So warn, which keeps the original rationale (it was about
+    // *silence*, not refusal): fork a genuinely shipped file and you are told
+    // it stops updating.
+    const exact = SYSTEM_PATHS.find((sys) => !sys.endsWith('/') && sys === path);
+    if (exact) {
+      reject(
+        path,
+        `the system layer ships it (SYSTEM_PATHS entry "${exact}"). `
+        + 'Declaring it would stop updates to it with no other signal',
+      );
+    }
+    const prefix = SYSTEM_PATHS.find((sys) => sys.endsWith('/') && path.startsWith(sys));
+    if (prefix) underSystemPath.push({ path, collision: prefix });
   }
   for (const { path, collision } of underSystemPath) {
     console.error(
@@ -1335,7 +1342,12 @@ export function locallyModifiedSystemFiles(paths, upstreamRef = 'FETCH_HEAD', ct
  *    than folded in here, since that means matching on git's stderr text.
  *
  * @param {string} path - a SYSTEM_PATHS entry, file or `dir/`-suffixed directory.
- * @param {string[]} preservedPaths - files this run is keeping local content for.
+ * @param {string[]} preservedPaths - what this run is keeping local content for.
+ *   Usually files, but a config/local-paths.txt declaration may be a `dir/`
+ *   entry, which covers every file under it — the same prefix rule
+ *   userLayerViolations() uses. Matching those by string equality left a
+ *   declared `providers/` reaching the checkout as both a path and its own
+ *   exclusion, which cancel out and abort the update.
  * @param {Set<string>} preservedSet - the same paths, as a Set, for lookup.
  * @param {{git?: Function}} [ctx] - injection point for tests; defaults to gitQuiet.
  * @returns {boolean}
@@ -1344,8 +1356,11 @@ export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {})
   if (preservedSet.size === 0) return false;
   const runGitQuiet = ctx.git || gitQuiet;
   const isDirectory = path.endsWith('/');
-  const preservedHere = preservedPaths.filter((f) => (isDirectory ? f.startsWith(path) : f === path));
-  if (preservedHere.length === 0) return false;
+  const preservedDirs = preservedPaths.filter((f) => f.endsWith('/'));
+  const coveredByPreserved = (f) => preservedSet.has(f) || preservedDirs.some((d) => f.startsWith(d));
+  const preservedHere = coveredByPreserved(path)
+    || (isDirectory && preservedPaths.some((f) => f.startsWith(path)));
+  if (!preservedHere) return false;
   if (!isDirectory) return true;
   let upstreamFiles = [];
   try {
@@ -1354,7 +1369,7 @@ export function pathFullyPreserved(path, preservedPaths, preservedSet, ctx = {})
   } catch {
     return false;
   }
-  return upstreamFiles.length > 0 && upstreamFiles.every((f) => preservedSet.has(f));
+  return upstreamFiles.length > 0 && upstreamFiles.every(coveredByPreserved);
 }
 
 /**

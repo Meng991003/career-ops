@@ -349,6 +349,74 @@ function canary() {
   process.exit(1);
 }
 
+/** Local-paths scenario 2 (#3934): a fork's OWN file under a SYSTEM_PATHS
+ *  DIRECTORY prefix must survive `apply`.
+ *
+ *  The mirror is NOT poisoned here — upstream has never heard of
+ *  `providers/my-own-board.mjs`, which is the whole point: absent upstream, it
+ *  looks exactly like a system file upstream dropped, and the stale-file prune
+ *  deleted it. The install declares the directory `providers/`, the wildcard
+ *  form, which is what a fork writes for "every provider in here is mine".
+ *
+ *  Why this leg and not a unit test. The prune's predicate is covered in
+ *  tests/updater-local-paths.test.mjs (case 7b), but that test hands
+ *  `staleSystemFiles` its fourth argument directly — which is the very wiring
+ *  that was wrong. Reverting apply()'s
+ *  `mergePathLists(effectiveUserPaths(), preservedPaths)` back to `USER_PATHS`
+ *  leaves it green. Only driving apply() pins the call site, so this leg is
+ *  where that revert goes red.
+ *
+ *  Two assertions, one per defect:
+ *    - exit 0        — a declared `dir/` reached the checkout as both a path
+ *                      and its own `:(exclude)`, which cancel out; git exits 1
+ *                      and apply rethrew it, aborting the whole update.
+ *    - byte-identical — the prune must not delete the declared file, and must
+ *                      not depend on it having uncommitted edits (committing
+ *                      your work is what used to make it deletable).
+ */
+function forkUnderSystemDirScenario(baseSha, oldTag, ok, commit) {
+  const DECLARED_DIR = 'providers/';
+  const FORK_FILE = 'providers/my-own-board.mjs';
+  const work = realpathSync(mkdtempSync(join(tmpdir(), 'upgrade-localpaths-dir-')));
+
+  try {
+    const mirror = buildMirror(work, baseSha);
+    const cfg = writeGitConfig(work, mirror);
+    const install = join(work, 'install');
+    git(ROOT, 'clone', '--quiet', '--branch', oldTag, ROOT, install);
+    git(install, 'remote', 'set-url', 'origin', CANONICAL);
+    seedFixture(install, { state: fixtureStateFor(oldTag) });
+
+    const forkContent = '// fork-only job board provider — no upstream counterpart\n';
+    mkdirSync(join(install, 'providers'), { recursive: true });
+    writeFileSync(join(install, FORK_FILE), forkContent);
+    mkdirSync(join(install, 'config'), { recursive: true });
+    writeFileSync(join(install, 'config', 'local-paths.txt'), `# every provider in here is mine\n${DECLARED_DIR}\n`);
+    git(install, 'add', '-f', FORK_FILE);
+    commit(install, 'fork: own provider under an upstream-owned directory');
+    const before = sha256(join(install, FORK_FILE));
+
+    let exitCode = 0, output = '';
+    try {
+      output = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
+        cwd: install, encoding: 'utf-8', timeout: 300000,
+        env: hermeticEnv(cfg),
+      });
+    } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
+
+    ok(exitCode === 0, `apply completes with a declared directory instead of aborting on a cancelled pathspec (exit ${exitCode})`);
+    const survived = existsSync(join(install, FORK_FILE)) && sha256(join(install, FORK_FILE)) === before;
+    ok(survived, `committed fork-local file under a declared directory is byte-identical after apply: ${FORK_FILE}`);
+
+    if ((exitCode !== 0 || !survived) && output) {
+      console.log('  --- apply output tail [local-paths/dir] ---');
+      console.log(output.split('\n').slice(-20).join('\n'));
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+}
+
 /** Local-paths leg (#2421): a file a fork DECLARED as its own must not be
  *  silently overwritten when upstream later starts shipping a file at that
  *  same path.
@@ -442,6 +510,8 @@ function localPathsLeg() {
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+
+  forkUnderSystemDirScenario(baseSha, oldTag, ok, commit);
 
   console.log(failures.length ? `RED: ${failures.length} failure(s)` : 'GREEN');
   process.exit(failures.length ? 1 : 0);

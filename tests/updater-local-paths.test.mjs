@@ -26,6 +26,7 @@ import {
   effectiveUserPaths,
   userLayerViolations,
   staleSystemFiles,
+  pathFullyPreserved,
 } from '../update-system.mjs';
 
 /** A throwaway root with an optional declaration file already written. */
@@ -119,27 +120,34 @@ function withStderr(fn) {
   }
 }
 
-// ── 6. A SYSTEM_PATHS collision is HONORED, and warns, naming the path ──
-//    This refused until a fork hit the real failure: refusing assumed a
-//    SYSTEM_PATHS match proves upstream ships the path, and it does not. An
-//    exact entry can be stale (naming a file the fetched tree no longer has),
-//    so the refusal fired on a fork's OWN file and left it undeclarable — after
-//    which the stale-file prune in apply() deleted it as a dropped system file.
-//    The rationale was about silence, not refusal, so the warning carries it.
+// ── 6. An EXACT SYSTEM_PATHS entry is still refused ──
+//    The two entry shapes make different claims, and only this one is a claim
+//    about a specific file: an exact entry is upstream saying "we ship this".
+//    Declaring it is a statement the updater cannot honour and evaluate at
+//    once, so it fails closed — which is also what upgrade-tests.mjs
+//    --local-paths drives end to end.
 {
-  const [declared, stderr] = withStderr(() => localUserPaths(root('merge-tracker.mjs\n')));
-  if (declared.includes('merge-tracker.mjs') && stderr.includes('merge-tracker.mjs')) {
-    pass('declaring a SYSTEM_PATHS entry is honored and warns, naming the path');
+  let threw = null;
+  try {
+    localUserPaths(root('merge-tracker.mjs\n'));
+  } catch (err) {
+    threw = err;
+  }
+  if (threw && threw.message.includes('merge-tracker.mjs')) {
+    pass('declaring an exact SYSTEM_PATHS entry is refused, naming the path');
   } else {
-    fail(`#6 expected it honored + warned, got declared=${JSON.stringify(declared)} stderr=${JSON.stringify(stderr)}`);
+    fail(`#6 expected a throw naming merge-tracker.mjs, got ${threw ? threw.message : 'no throw'}`);
   }
 }
 
-// ── 7. A path inside a SYSTEM_PATHS *directory* is honored and warns too ──
-//    'providers/' is the case that matters: it covers upstream's greenhouse.mjs
-//    and a provider that exists only in this fork, so the prefix cannot tell
-//    them apart. Honoring both is what keeps the fork's file alive; the warning
-//    is what stops a genuine fork-of-a-shipped-file being silent.
+// ── 7. A path inside a SYSTEM_PATHS *directory* is honored, and warns ──
+//    'providers/' is a WILDCARD, not a claim about any one file: it covers
+//    upstream's greenhouse.mjs and a provider that exists only in this fork
+//    alike, so the prefix cannot tell them apart. Refusing here fired on
+//    exactly the files this mechanism exists for and left them undeclarable —
+//    after which the stale-file prune in apply() deleted them as dropped system
+//    files. Honoring is what keeps the fork's file alive; the warning carries
+//    the original rationale, which was about silence rather than refusal.
 {
   const [declared, stderr] = withStderr(() => localUserPaths(root('providers/my-own-board.mjs\n')));
   if (declared.includes('providers/my-own-board.mjs') && stderr.includes('providers/')) {
@@ -167,6 +175,30 @@ function withStderr(fn) {
     pass('a declared fork-local file survives the prune; an undeclared stale one still goes');
   } else {
     fail(`#7b expected only dropped-upstream.mjs pruned, got ${JSON.stringify(stale)}`);
+  }
+}
+
+// ── 7c. A declared DIRECTORY must not cancel its own checkout ──
+//    'providers/' is a valid declaration (case 20), and apply() folds declared
+//    paths into the checkout exclusions. Matching them by string equality left
+//    `git checkout FETCH_HEAD -- providers/ :(exclude)providers/` — a pathspec
+//    pair that cancels out, which git exits 1 on. apply() rethrows that as a
+//    genuine failure, so one trailing slash in the declaration file aborted the
+//    whole update. A `dir/` entry covers the files under it, the same prefix
+//    rule userLayerViolations() already uses.
+{
+  const declared = ['providers/'];
+  const upstream = ['providers/greenhouse.mjs', 'providers/lever.mjs'];
+  const stubGit = () => upstream.join('\n');
+
+  const whole = pathFullyPreserved('providers/', declared, new Set(declared), { git: stubGit });
+  // A sibling system path the declaration says nothing about must still be
+  // checked out — the prefix rule must not swallow the rest of the tree.
+  const sibling = pathFullyPreserved('modes/pdf/', declared, new Set(declared), { git: stubGit });
+  if (whole && !sibling) {
+    pass('a declared directory is skipped whole, and does not claim sibling system paths');
+  } else {
+    fail(`#7c expected providers/ preserved and modes/pdf/ not, got ${whole} / ${sibling}`);
   }
 }
 
