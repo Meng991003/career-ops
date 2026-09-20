@@ -13,7 +13,7 @@
  * stop a system file from updating says so out loud instead of doing it quietly.
  */
 
-import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, readFileSync, rmSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -199,6 +199,33 @@ function withStderr(fn) {
     pass('a declared directory is skipped whole, and does not claim sibling system paths');
   } else {
     fail(`#7c expected providers/ preserved and modes/pdf/ not, got ${whole} / ${sibling}`);
+  }
+}
+
+// ── 7d. apply() must hand the prune the WIDENED list, not USER_PATHS ──
+//    7b drives the real staleSystemFiles() but supplies its fourth argument,
+//    and 7c drives pathFullyPreserved() through a stub. Neither sits on the
+//    call site, so reverting apply()'s one-line wiring back to USER_PATHS left
+//    this whole file green while the fork-file deletion shipped again — raised
+//    twice in review, and reproduced both times.
+//
+//    The behavioural proof lives in `node upgrade-tests.mjs --local-paths`,
+//    which drives apply() for real and goes RED on that revert (CI runs it as
+//    the "Upgrade regression gate"). That leg needs a git clone, a mirror and
+//    two full applies, so it cannot live here. This is the cheap tripwire that
+//    makes the FAST suite fail too, so the revert cannot reach review green
+//    whichever suite someone happens to run.
+//
+//    Source-pattern rather than behavioural, deliberately, matching how
+//    updater-migration-tests.mjs pins the other apply() call sites.
+{
+  const source = readFileSync(join(ROOT, 'update-system.mjs'), 'utf-8');
+  const wired = /staleSystemFiles\([^)]*mergePathLists\(\s*effectiveUserPaths\(\)/.test(source);
+  const usesBuiltinOnly = /staleSystemFiles\([^)]*mergePathLists\(\s*USER_PATHS\b/.test(source);
+  if (wired && !usesBuiltinOnly) {
+    pass("apply() passes effectiveUserPaths() to the stale-file prune, not USER_PATHS");
+  } else {
+    fail(`#7d apply()'s staleSystemFiles call must read effectiveUserPaths(); wired=${wired} usesBuiltinOnly=${usesBuiltinOnly}`);
   }
 }
 
