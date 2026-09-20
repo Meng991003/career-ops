@@ -907,7 +907,16 @@ function assertOwnGitToplevel() {
  * @param {string[]} targetPaths - SYSTEM_PATHS read from the target updater.
  * @returns {string[]} Entries present in FETCH_HEAD but absent locally.
  */
-function missingFromTargetManifest(targetPaths) {
+function missingFromTargetManifest(targetPaths, declaredLocal = localUserPaths(ROOT)) {
+  // A file the user declared theirs (config/local-paths.txt) is deliberately
+  // held back from the checkout, so its absence is the declaration working, not
+  // a partial update. Without this, declaring a directory upstream keeps adding
+  // files to — `providers/`, the wildcard form a fork writes for "every
+  // provider in here is mine" — made every apply report "Update incomplete" and
+  // exit 1, with nothing actually wrong. Per-FILE, not per-manifest-entry: a
+  // declaration covering only part of a directory must still let the rest of
+  // that directory be verified.
+  const isDeclared = (f) => declaredLocal.some((d) => (d.endsWith('/') ? f.startsWith(d) : f === d));
   const missing = [];
   for (const path of targetPaths) {
     const spec = path.endsWith('/') ? path.slice(0, -1) : path;
@@ -926,11 +935,11 @@ function missingFromTargetManifest(targetPaths) {
         continue; // FETCH_HEAD unreadable for this spec — treat as stale, not missing
       }
       // Empty tree ⇒ the target ships nothing here (stale manifest entry).
-      if (treeFiles.some(f => !existsSync(join(ROOT, f)))) missing.push(path);
+      if (treeFiles.some(f => !isDeclared(f) && !existsSync(join(ROOT, f)))) missing.push(path);
       continue;
     }
 
-    if (existsSync(join(ROOT, spec))) continue;
+    if (isDeclared(path) || existsSync(join(ROOT, spec))) continue;
     // Only count it as missing when the target actually ships it — a manifest
     // entry the target no longer carries is a stale entry, not a failed update.
     try {
