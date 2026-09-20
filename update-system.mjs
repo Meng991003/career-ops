@@ -905,6 +905,9 @@ function assertOwnGitToplevel() {
  * out when the next script crashes with ERR_MODULE_NOT_FOUND (#1998).
  *
  * @param {string[]} targetPaths - SYSTEM_PATHS read from the target updater.
+ * @param {string[]} [declaredLocal] - config/local-paths.txt declarations; files
+ *   under them are held back from the checkout on purpose, so they are never
+ *   counted as missing. Defaults to reading the declaration file.
  * @returns {string[]} Entries present in FETCH_HEAD but absent locally.
  */
 function missingFromTargetManifest(targetPaths, declaredLocal = localUserPaths(ROOT)) {
