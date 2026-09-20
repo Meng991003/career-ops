@@ -366,10 +366,20 @@ function canary() {
  *  leaves it green. Only driving apply() pins the call site, so this leg is
  *  where that revert goes red.
  *
- *  Two assertions, one per defect:
- *    - exit 0        — a declared `dir/` reached the checkout as both a path
- *                      and its own `:(exclude)`, which cancel out; git exits 1
- *                      and apply rethrew it, aborting the whole update.
+ *  Applied TWICE, which is what makes it load-bearing. On the first apply the
+ *  fork file is still spared by accident: `locallyModifiedSystemFiles` diffs
+ *  against the merge-base, the fork's commit sits after it, so the file reads
+ *  as a local edit and lands in `preservedPaths`. The first apply then writes a
+ *  `chore: auto-update system files` commit, which becomes the baseline — and
+ *  on the second apply the file no longer differs from it, drops out of
+ *  `preservedPaths`, and meets the prune with nothing but the declaration
+ *  between them. That is the reported shape: an install that has updated once
+ *  before, which is every install.
+ *
+ *  Three assertions:
+ *    - both applies exit 0 — a declared `dir/` reached the checkout as both a
+ *                      path and its own `:(exclude)`, which cancel out; git
+ *                      exits 1 and apply rethrew it, aborting the update.
  *    - byte-identical — the prune must not delete the declared file, and must
  *                      not depend on it having uncommitted edits (committing
  *                      your work is what used to make it deletable).
@@ -396,17 +406,24 @@ function forkUnderSystemDirScenario(baseSha, oldTag, ok, commit) {
     commit(install, 'fork: own provider under an upstream-owned directory');
     const before = sha256(join(install, FORK_FILE));
 
-    let exitCode = 0, output = '';
-    try {
-      output = execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
-        cwd: install, encoding: 'utf-8', timeout: 300000,
-        env: hermeticEnv(cfg),
-      });
-    } catch (e) { exitCode = e.status ?? 1; output = `${e.stdout ?? ''}${e.stderr ?? ''}`; }
+    const runApply = () => {
+      try {
+        return { exitCode: 0, output: execFileSync(process.execPath, ['update-system.mjs', 'apply', '--confirm'], {
+          cwd: install, encoding: 'utf-8', timeout: 300000,
+          env: hermeticEnv(cfg),
+        }) };
+      } catch (e) { return { exitCode: e.status ?? 1, output: `${e.stdout ?? ''}${e.stderr ?? ''}` }; }
+    };
 
-    ok(exitCode === 0, `apply completes with a declared directory instead of aborting on a cancelled pathspec (exit ${exitCode})`);
+    const first = runApply();
+    ok(first.exitCode === 0, `first apply completes with a declared directory instead of aborting on a cancelled pathspec (exit ${first.exitCode})`);
+    const second = runApply();
+    ok(second.exitCode === 0, `second apply completes (exit ${second.exitCode})`);
+    const exitCode = first.exitCode || second.exitCode;
+    const output = `${first.output}${second.output}`;
+
     const survived = existsSync(join(install, FORK_FILE)) && sha256(join(install, FORK_FILE)) === before;
-    ok(survived, `committed fork-local file under a declared directory is byte-identical after apply: ${FORK_FILE}`);
+    ok(survived, `committed fork-local file under a declared directory is byte-identical after a SECOND apply: ${FORK_FILE}`);
 
     if ((exitCode !== 0 || !survived) && output) {
       console.log('  --- apply output tail [local-paths/dir] ---');
