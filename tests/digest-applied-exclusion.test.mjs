@@ -78,6 +78,15 @@ try {
   if (none.length === 0) pass('collectJobs still honours the pipeline.md intersection');
   else fail(`postings absent from pipeline.md should not appear, got ${none.length}`);
 
+  // --- pickAppliedToday: "posted:" ahead of "Applied" must not win (row 471)
+  const { pickAppliedToday } = await import(pathToFileURL(join(ROOT, 'daily-digest.mjs')).href);
+  const picked = pickAppliedToday([{
+    date: '2026-09-18', company: 'Synapxe', role: 'Engineer', urls: ['https://a.b/c'],
+    notes: 'x; posted: 2026-09-18; Applied 2026-09-23 via portal. https://a.b/c',
+  }], '2026-09-23');
+  if (picked.length === 1) pass('pickAppliedToday prefers "Applied" date over an earlier "posted:" date');
+  else fail(`expected the row applied 2026-09-23, got ${JSON.stringify(picked)}`);
+
 } catch (e) {
   fail(`digest applied-exclusion tests crashed: ${e.message}`);
 }
