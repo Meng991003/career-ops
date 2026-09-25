@@ -1,7 +1,7 @@
 {
   "name": "career-ops",
   "version": "1.12.0",
-  "description": "AI-powered job search pipeline — works with any AI coding CLI (Claude Code, OpenCode, Gemini, Codex, Qwen)",
+  "description": "AI-powered job search pipeline \u2014 works with any AI coding CLI (Claude Code, OpenCode, Gemini, Codex, Qwen)",
   "private": true,
   "scripts": {
     "doctor": "node doctor.mjs",
@@ -22,9 +22,11 @@
     "validate:portals": "node validate-portals.mjs",
     "verify:portals": "node verify-portals.mjs",
     "tracker": "node tracker.mjs",
+    "web": "node server/index.mjs",
     "patterns": "node analyze-patterns.mjs",
     "gemini:eval": "node gemini-eval.mjs",
-    "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps"
+    "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",
+    "test-skills": "node test-skills.mjs"
   },
   "keywords": [
     "ai",
@@ -36,7 +38,7 @@
     "careerops",
     "automation"
   ],
-  "author": "Santiago Fernández de Valderrama <hi@santifer.io> (https://santifer.io)",
+  "author": "Santiago Fern\u00e1ndez de Valderrama <hi@santifer.io> (https://santifer.io)",
   "homepage": "https://santifer.io",
   "repository": {
     "type": "git",
@@ -47,6 +49,8 @@
     "@google/generative-ai": "^0.24.1",
     "dotenv": "^17.0.0",
     "js-yaml": "^4.1.1",
+    "mammoth": "^1.12.0",
+    "pdf-parse": "^1.1.1",
     "playwright": "1.61.0"
   }
 }

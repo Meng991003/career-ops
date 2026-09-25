@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Career-Ops</title><link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="error-banner" hidden></div>
+  <div id="ok-banner" hidden></div>
+  <header><h1>Career-Ops</h1>
+    <nav>
+      <button data-view="board" class="active">Applications</button>
+      <button data-view="progress">Progress</button>
+      <button data-view="onboard">Setup</button>
+    </nav>
+  </header>
+  <main>
+    <section id="onboard" hidden>
+      <h2>Onboarding</h2>
+      <div id="setup-status"></div>
+      <label>Paste your CV (markdown)<textarea id="cv" rows="8"></textarea></label>
+      <label>…or upload your resume (PDF or .docx)
+        <input type="file" id="cv-file" accept=".pdf,.docx">
+      </label>
+      <div id="upload-status"></div>
+      <button id="save-cv">Save CV</button>
+      <fieldset><legend>Profile</legend>
+        <input id="full_name" placeholder="Full name">
+        <input id="email" placeholder="Email">
+        <input id="phone" placeholder="Phone">
+        <input id="linkedin" placeholder="LinkedIn URL">
+        <input id="github" placeholder="GitHub URL">
+        <input id="location" placeholder="Your location (e.g. Kuala Lumpur, MY)">
+        <input id="preferred_location" placeholder="Preferred work location(s), e.g. Kuala Lumpur / Remote">
+        <input id="timezone" placeholder="Timezone (e.g. Asia/Kuala_Lumpur)">
+        <input id="target_roles" placeholder="Target roles, comma-separated">
+        <div class="salary-row">
+          <input id="salary_target" placeholder="Salary target (e.g. RM8k-12k)">
+          <select id="salary_period">
+            <option value="monthly" selected>per month</option>
+            <option value="annual">per year</option>
+          </select>
+        </div>
+        <label class="field-label">Headline</label>
+        <input id="headline" placeholder="One-line positioning, e.g. Full Stack Engineer (Vue / .NET), 5 yrs">
+        <label class="field-label">Exit story / positioning</label>
+        <textarea id="exit_story" rows="2" placeholder="What makes you unique; what you're targeting"></textarea>
+        <label class="field-label">Superpowers <span class="hint">(one per line)</span></label>
+        <textarea id="superpowers" rows="4" placeholder="e.g. Production issue investigation&#10;Full-stack dev (Vue / .NET)"></textarea>
+        <label class="field-label">Proof points <span class="hint">(one per line: name | metric | url)</span></label>
+        <textarea id="proof_points" rows="3" placeholder="Perf optimization | up to 30% gains | https://…"></textarea>
+        <button id="save-profile">Save Profile</button>
+      </fieldset>
+      <fieldset><legend>Portals</legend>
+        <input id="keywords" placeholder="Title keywords, comma-separated">
+        <button id="save-portals">Save Portals</button>
+      </fieldset>
+    </section>
+    <section id="board"><h2>Applications</h2><div id="board-cols"></div></section>
+    <section id="progress" hidden><h2>Progress</h2><div id="funnel"></div></section>
+  </main>
+  <div id="modal" hidden><div id="modal-body"></div><button id="modal-close">Close</button></div>
+  <script src="/app.js"></script>
+</body>
+</html>

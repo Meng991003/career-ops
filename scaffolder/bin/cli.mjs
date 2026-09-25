@@ -9,9 +9,10 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join, delimiter } from "node:path";
+import { ensureSkillEntrypoints } from "./skill-entrypoints.mjs";
 
-const REPO = "https://github.com/santifer/career-ops.git";
-const LATEST_RELEASE = "https://api.github.com/repos/santifer/career-ops/releases/latest";
+const REPO = "https://github.com/career-ops-hq/career-ops.git";
+const LATEST_RELEASE = "https://api.github.com/repos/career-ops-hq/career-ops/releases/latest";
 const NPM = process.platform === "win32" ? "npm.cmd" : "npm";
 
 // career-ops is AI-agnostic: every one of these CLIs reads AGENTS.md and works
@@ -25,6 +26,7 @@ const SUPPORTED_CLIS = [
   { name: "OpenCode", cmd: "opencode" },
   { name: "GitHub Copilot CLI", cmd: "copilot" },
   { name: "Antigravity CLI", cmd: "agy" },
+  { name: "Grok Build CLI", cmd: "grok" },
 ];
 
 const USAGE = `career-ops — set up an AI job search workspace.
@@ -33,7 +35,7 @@ Usage:
   npx career-ops init [folder]    Create a new workspace (default: ./career-ops)
 
 After setup, open your AI coding tool inside the folder and paste a job offer.
-Docs: https://github.com/santifer/career-ops`;
+Docs: https://github.com/career-ops-hq/career-ops`;
 
 function die(msg) {
   console.error(`\n✗ ${msg}\n`);
@@ -120,6 +122,12 @@ async function main() {
     console.warn('\n! npm install failed — you can re-run it manually later with "npm install".');
   }
 
+  // 2b. Bootstrap CLI skill entrypoints (covers CLIs added after the cloned release).
+  const bootstrapped = ensureSkillEntrypoints(target);
+  if (bootstrapped.length > 0) {
+    console.log(`\n→ Bootstrapped ${bootstrapped.length} CLI skill entrypoint(s) for this workspace`);
+  }
+
   // 3. Next steps. We do NOT scaffold cv.md / profile.yml / portals.yml here:
   // their absence is what triggers the agent's conversational onboarding on
   // first launch, which sets them up far better than copying placeholders.
@@ -139,7 +147,7 @@ async function main() {
 
   console.log("\nOn first launch it walks you through setup — your CV, profile and target");
   console.log("roles — just by chatting. Nothing to configure by hand.");
-  console.log("\ncareer-ops is AI-agnostic — Claude Code, Gemini, Codex, Qwen, OpenCode and Copilot all work.");
+  console.log("\ncareer-ops is AI-agnostic — Claude Code, Codex, Qwen, OpenCode, Copilot, Antigravity and Grok all work.");
   console.log("\nOptional (for PDF generation):");
   console.log("  npx playwright install chromium\n");
 }
