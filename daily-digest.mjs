@@ -37,6 +37,7 @@ import foundit from './providers/foundit.mjs';
 // scan.mjs guards its main() behind an import.meta.url check (scan.mjs:1031),
 // so importing it is safe — it does NOT trigger a scan. Verified: 14ms.
 import { annotateApplyRoute } from './apply-route.mjs';
+import { parseAppliedDate } from './followup-cadence.mjs';
 import { buildSalaryFilter, buildTitleFilter, buildLocationFilter } from './scan.mjs';
 import { roleTokens } from './role-matcher.mjs';
 // Same canonical posting key merge-tracker.mjs dedups on, so the digest's
@@ -212,7 +213,13 @@ export function parseAppliedUrls(text) {
  * @returns {string}
  */
 function submittedDate(row) {
-  const m = String(row?.notes || '').match(/\d{4}-\d{2}-\d{2}/);
+  const notes = String(row?.notes || '');
+  // "Applied YYYY-MM-DD" wins: notes routinely carry "posted: YYYY-MM-DD"
+  // ahead of it, and a positional first-date scan picked the posting date.
+  // Shared with followup-seed / company-history so all agree on the date.
+  const applied = parseAppliedDate(notes, { requireValidCalendarDate: true });
+  if (applied) return applied;
+  const m = notes.replace(/posted:\s*\d{4}-\d{2}-\d{2}/gi, '').match(/\d{4}-\d{2}-\d{2}/);
   return m ? m[0] : row.date;
 }
 
