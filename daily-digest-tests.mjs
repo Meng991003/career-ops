@@ -12,7 +12,7 @@ import yaml from 'js-yaml';
 import {
   scoreJob, rankJobs, renderDigest, parseAppliedUrls, parseAppliedRows,
   pickAppliedToday, parsePendingUrls, digestDate, collectJobs, skillTokens,
-  loadBenchmarks, classifyTitle, lookupBucket,
+  loadBenchmarks, classifyTitle, lookupBucket, digestData,
 } from './daily-digest.mjs';
 // scan.mjs guards its main() behind an import.meta.url check, so importing it
 // here (for buildSalaryFilter, to prove the hard filter never sees an
@@ -808,6 +808,30 @@ const noBenchmarksHtml = renderDigest({
   applied: [], failures: [], date: '2026-08-20', benchmarks: null,
 });
 assert(!/refresh_after/i.test(noBenchmarksHtml), 'no benchmarks at all -> no stale note either');
+
+section('digestData — the JSON twin the web UI reads');
+{
+  const data = digestData({
+    date: '2026-09-28',
+    sections: [{
+      label: 'JobStreet',
+      jobs: [
+        { title: 'Dev', company: 'Acme', url: 'https://x.test/1', location: 'Singapore',
+          salary: { min: 120000, max: 120000 }, postedAt: '2026-09-01T08:00:00Z', applyRoute: 'open', score: 7 },
+        { title: 'Ops', url: 'https://x.test/2', score: 3 },
+      ],
+    }],
+  });
+  assert(data.date === '2026-09-28', 'carries the digest date');
+  const [a, b] = data.sections[0].jobs;
+  assert(data.sections[0].label === 'JobStreet', 'keeps the section label');
+  assert(a.triage === 7 && a.applyRoute === 'open', 'keeps triage rank and apply route');
+  assert(a.salary !== null && a.salary.includes('10,000'), 'salary is the same monthly text the page shows');
+  assert(a.postedAt === '2026-09-01', 'postedAt is a plain date');
+  assert(b.company === '' && b.salary === null && b.postedAt === null && b.applyRoute === null,
+    'missing fields become empty/null, never undefined');
+  assert(JSON.stringify(data) === JSON.stringify(JSON.parse(JSON.stringify(data))), 'is plain JSON');
+}
 
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

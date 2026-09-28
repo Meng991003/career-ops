@@ -650,6 +650,30 @@ function isBenchmarksStale(benchmarks, date) {
 }
 
 /**
+ * Machine-readable twin of the rendered digest, read by the web UI's Today
+ * screen (server/lib/today.mjs). Same sections, same rows, same order — only
+ * the fields the UI shows. Written next to the HTML so neither drifts.
+ */
+export function digestData({ sections, date }) {
+  return {
+    date,
+    sections: sections.map(({ label, jobs }) => ({
+      label,
+      jobs: jobs.map(j => ({
+        title: j.title ?? '',
+        company: j.company ?? '',
+        url: j.url ?? '',
+        location: j.location ?? '',
+        salary: salaryText(j.salary),
+        postedAt: j.postedAt ? new Date(j.postedAt).toISOString().slice(0, 10) : null,
+        applyRoute: j.applyRoute ?? null,
+        triage: j.score,
+      })),
+    })),
+  };
+}
+
+/**
  * Render the complete digest page.
  * @param {{
  *   sections: Array<{label: string, jobs: Array<any>}>, applied: Array<any>,
@@ -895,8 +919,11 @@ async function main() {
   if (!existsSync(OUTPUT_DIR)) mkdirSync(OUTPUT_DIR, { recursive: true });
   const outPath = join(OUTPUT_DIR, `digest-${date}.html`);
   writeFileSync(outPath, html, 'utf-8');
+  const jsonPath = join(OUTPUT_DIR, `digest-${date}.json`);
+  writeFileSync(jsonPath, JSON.stringify(digestData({ sections, date }), null, 2) + '\n', 'utf-8');
 
   console.log(`Digest written: ${outPath}`);
+  console.log(`  data: ${jsonPath}`);
   console.log(`  candidates: ${collected.length}`);
   for (const s of sections) console.log(`  ${s.label}: shown ${s.jobs.length}`);
   if (failures.length) console.log(`  failed sources: ${failures.length}`);
