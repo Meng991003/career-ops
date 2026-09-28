@@ -58,3 +58,22 @@ describe('sortRows', () => {
     expect(nums(sortRows([row({ '#': '10' }), row({ '#': '9' })], 'num', false))).toEqual(['9', '10'])
   })
 })
+
+describe('stationOf', () => {
+  it('places on-line statuses in pipeline order and off-line ones at -1', async () => {
+    const { stationOf, LINE, OFF_LINE } = await import('./rows')
+    expect(LINE).toEqual(['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired'])
+    expect(OFF_LINE).toEqual(['Rejected', 'Discarded', 'SKIP'])
+    expect(stationOf('Evaluated')).toBe(0)
+    expect(stationOf('Interview')).toBe(3)
+    expect(stationOf('Rejected')).toBe(-1)
+    expect(stationOf('nonsense')).toBe(-1)
+  })
+})
+
+describe('sortRows by stage', () => {
+  it('puts the furthest on-line stage first and off-line statuses last', () => {
+    const rs = [row({ '#': '1', Status: 'Rejected' }), row({ '#': '2', Status: 'Interview' }), row({ '#': '3', Status: 'Applied' })]
+    expect(nums(sortRows(rs, 'status', true))).toEqual(['2', '3', '1'])
+  })
+})

@@ -1,6 +1,12 @@
 export type Row = Record<string, string>
 
-export const STATUSES = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired', 'Rejected', 'Discarded', 'SKIP']
+// The pipeline is a line with stations in a real order; the other three
+// statuses are where an application leaves the line.
+export const LINE = ['Evaluated', 'Applied', 'Responded', 'Interview', 'Offer', 'Hired']
+export const OFF_LINE = ['Rejected', 'Discarded', 'SKIP']
+export const STATUSES = [...LINE, ...OFF_LINE]
+
+export const stationOf = (status: string) => LINE.indexOf(status)
 
 export function scoreOf(r: Row): number | null {
   const m = /^(\d+(?:\.\d+)?)\/5/.exec((r.Score ?? '').trim())
@@ -54,7 +60,7 @@ export function sortRows(rows: Row[], key: SortKey, desc: boolean): Row[] {
       return (sa - sb) * dir
     }
     if (key === 'num') return (Number(a['#']) - Number(b['#'])) * dir
-    if (key === 'status') return (STATUSES.indexOf(a.Status) - STATUSES.indexOf(b.Status)) * dir
+    if (key === 'status') return (stationOf(a.Status) - stationOf(b.Status)) * dir // off-line (-1) sorts past every station
     const field = key === 'date' ? 'Date' : 'Company'
     return (a[field] ?? '').localeCompare(b[field] ?? '') * dir
   })

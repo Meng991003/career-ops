@@ -4,22 +4,22 @@ import { getApplication, type Detail } from '@/lib/api'
 import { splitReport } from '@/lib/report'
 import { scoreOf } from '@/lib/rows'
 import { StatusEditor } from '@/components/StatusEditor'
-import { Badge } from '@/components/ui/badge'
+import { StageRail } from '@/components/Rail'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 function CopyPrompt({ text }: { text: string }) {
   return (
-    <div className="flex items-center gap-2 rounded border p-2 text-sm">
-      <code className="flex-1">{text}</code>
+    <div className="flex items-center gap-2 rounded-lg border bg-muted/50 p-2 pl-3 text-sm">
+      <code className="flex-1 font-mono">{text}</code>
       <Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(text)}>Copy</Button>
     </div>
   )
 }
 
 const Section = ({ title, children }: { title: string; children: React.ReactNode }) => (
-  <section className="space-y-2"><h3 className="text-sm font-semibold">{title}</h3>{children}</section>
+  <section className="space-y-2.5"><h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>{children}</section>
 )
 
 export function JobDrawer({ num, onClose, onChanged }: { num: string | null; onClose: () => void; onChanged: () => void }) {
@@ -40,24 +40,39 @@ export function JobDrawer({ num, onClose, onChanged }: { num: string | null; onC
 
   return (
     <Sheet open={num !== null} onOpenChange={open => !open && onClose()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-3xl">
-        {error && <p className="text-sm text-red-600">{error}</p>}
+      <SheetContent className="w-full overflow-y-auto px-6 pb-10 sm:max-w-3xl">
+        {error && <p className="pt-6 text-sm text-destructive">Couldn't load this application: {error}</p>}
         {!d && !error && <p className="text-sm text-muted-foreground">Loading…</p>}
         {d && (
           <div className="space-y-6">
-            <SheetHeader>
-              <SheetTitle>{d.row.Company} — {d.row.Role}</SheetTitle>
-              <SheetDescription className="flex flex-wrap items-center gap-2">
-                <span>#{d.row['#']}</span>
-                <span>score {scoreOf(d.row)?.toFixed(1) ?? '—'}</span>
-                <Badge variant="secondary">{d.row.Status}</Badge>
-                {url && /^https?:\/\//.test(url) && <a className="underline" href={url} target="_blank" rel="noreferrer">posting ↗</a>}
+            <SheetHeader className="gap-3 border-b px-0 pb-5">
+              <SheetDescription className="font-mono text-xs">
+                #{d.row['#']} · {d.row.Date}
+                {url && /^https?:\/\//.test(url) && <> · <a className="text-line underline-offset-4 hover:underline" href={url} target="_blank" rel="noreferrer">Open posting ↗</a></>}
               </SheetDescription>
+              <SheetTitle className="text-2xl font-extrabold leading-tight tracking-tight">
+                {d.row.Company === '?' ? 'Undisclosed employer' : d.row.Company}
+                <span className="mt-1 block text-base font-medium text-muted-foreground">{d.row.Role}</span>
+              </SheetTitle>
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-3">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Fit</div>
+                  <div className={`font-mono text-2xl ${(scoreOf(d.row) ?? 0) >= 4 ? 'font-semibold text-signal' : ''}`}>
+                    {scoreOf(d.row)?.toFixed(1) ?? '—'}<span className="text-sm text-muted-foreground">/5</span>
+                  </div>
+                </div>
+                <div>
+                  <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    Stage · <span className="text-foreground">{d.row.Status === 'SKIP' ? 'Skipped' : d.row.Status}</span>
+                  </div>
+                  <StageRail status={d.row.Status} size="lg" />
+                </div>
+              </div>
             </SheetHeader>
 
             <StatusEditor num={d.row['#']} status={d.row.Status}
               onSaved={() => { setReloadKey(k => k + 1); onChanged() }} />
-            <p className="text-sm text-muted-foreground">Notes: {d.row.Notes || '—'}</p>
+            <Section title="Notes"><p className="text-sm leading-relaxed">{d.row.Notes && d.row.Notes !== '—' ? d.row.Notes : <span className="text-muted-foreground">No notes yet.</span>}</p></Section>
 
             <Section title="Timeline">
               {d.timeline.length === 0
@@ -65,7 +80,7 @@ export function JobDrawer({ num, onClose, onChanged }: { num: string | null; onC
                 : <ol className="space-y-1 text-sm">
                     {d.timeline.map((t, i) => (
                       <li key={i} className="flex gap-3">
-                        <span className="w-24 tabular-nums text-muted-foreground">{t.date}</span>
+                        <span className="w-24 shrink-0 font-mono text-xs leading-5 text-muted-foreground">{t.date}</span>
                         <span>{t.kind === 'due' ? '⏰ ' : t.kind === 'sent' ? '✉️ ' : ''}{t.detail}</span>
                       </li>
                     ))}
@@ -81,7 +96,7 @@ export function JobDrawer({ num, onClose, onChanged }: { num: string | null; onC
                   </TabsList>
                   {(['cv', 'cover'] as const).map(k => d.documents[k] && (
                     <TabsContent key={k} value={k}>
-                      <iframe title={k} src={d.documents[k]!} className="h-[70vh] w-full rounded border" />
+                      <iframe title={k === 'cv' ? 'Tailored CV' : 'Cover letter'} src={d.documents[k]!} className="h-[70vh] w-full rounded-lg border" />
                     </TabsContent>
                   ))}
                 </Tabs>
@@ -95,7 +110,7 @@ export function JobDrawer({ num, onClose, onChanged }: { num: string | null; onC
 
             <Section title="Contacts">
               {d.contacts.length === 0
-                ? <p className="text-sm text-amber-700">⚠ No recruiter or hiring-manager contact on record.</p>
+                ? <p className="rounded-lg border border-dashed p-3 text-sm text-muted-foreground">No recruiter or hiring-manager contact recorded. Follow-ups go further with a named person — add one with <code className="font-mono text-foreground">/career-ops contacto</code>.</p>
                 : <ul className="space-y-1 text-sm">
                     {d.contacts.map(c => (
                       <li key={c.name + c.company}>
@@ -117,7 +132,7 @@ export function JobDrawer({ num, onClose, onChanged }: { num: string | null; onC
               {!d.report
                 ? <p className="text-sm text-muted-foreground">No report linked.</p>
                 : splitReport(d.report).map((s, i) => (
-                    <details key={s.title + i} open={i === 0} className="rounded border p-3">
+                    <details key={s.title + i} open={i === 0} className="rounded-lg border bg-card p-3 open:shadow-sm">
                       <summary className="cursor-pointer text-sm font-medium">{s.title}</summary>
                       <div className="prose prose-sm mt-2 max-w-none text-sm"><Markdown>{s.body}</Markdown></div>
                     </details>
