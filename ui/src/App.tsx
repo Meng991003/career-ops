@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ApplicationsTable } from '@/components/ApplicationsTable'
 import { JobDrawer } from '@/components/JobDrawer'
+import { ThemeToggle } from '@/components/ThemeToggle'
 
 export default function App() {
   const [openNum, setOpenNum] = useState<string | null>(null)
@@ -12,7 +13,8 @@ export default function App() {
           <span aria-hidden className="size-2.5 rounded-full bg-line ring-4 ring-line/15" />
           <span className="text-sm font-extrabold tracking-tight">Career-Ops</span>
           <span className="text-sm text-muted-foreground">/ Applications</span>
-          <a href="/legacy" className="ml-auto text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Setup (old UI)</a>
+          <a href="/legacy" className="ml-auto mr-2 text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Setup (old UI)</a>
+          <ThemeToggle />
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">

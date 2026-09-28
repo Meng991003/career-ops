@@ -97,37 +97,44 @@
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    /* Night signage: same system, line blue and amber lifted for contrast. */
+    color-scheme: dark;
+    --ink: #E6EBF2;
+    --paper: #0E1520;
+    --rule: #253044;
+    --line: #7394FF;
+    --signal: #F2B743;
+    --background: var(--paper);
+    --foreground: var(--ink);
+    --card: #151E2C;
+    --card-foreground: var(--ink);
+    --popover: #151E2C;
+    --popover-foreground: var(--ink);
+    --primary: var(--line);
+    --primary-foreground: #0E1520;
+    --secondary: #1C2738;
+    --secondary-foreground: var(--ink);
+    --muted: #1C2738;
+    --muted-foreground: #8F9AAE;
+    --accent: #1D2A45;
+    --accent-foreground: var(--ink);
+    --destructive: #F07A63;
+    --border: var(--rule);
+    --input: var(--rule);
+    --ring: var(--line);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    --sidebar: #151E2C;
+    --sidebar-foreground: var(--ink);
+    --sidebar-primary: var(--line);
+    --sidebar-primary-foreground: #0E1520;
+    --sidebar-accent: #1D2A45;
+    --sidebar-accent-foreground: var(--ink);
+    --sidebar-border: var(--rule);
+    --sidebar-ring: var(--line);
 }
 
 @layer base {

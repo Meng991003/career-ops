@@ -5,6 +5,14 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Career-Ops</title>
+    <script>
+      // Apply the saved or system theme before first paint (next-themes key "theme").
+      try {
+        const t = localStorage.getItem('theme')
+        if (t === 'dark' || ((!t || t === 'system') && matchMedia('(prefers-color-scheme: dark)').matches))
+          document.documentElement.classList.add('dark')
+      } catch {}
+    </script>
   </head>
   <body>
     <div id="root"></div>

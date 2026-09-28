@@ -134,7 +134,7 @@ export function JobDrawer({ num, onClose, onChanged }: { num: string | null; onC
                 : splitReport(d.report).map((s, i) => (
                     <details key={s.title + i} open={i === 0} className="rounded-lg border bg-card p-3 open:shadow-sm">
                       <summary className="cursor-pointer text-sm font-medium">{s.title}</summary>
-                      <div className="prose prose-sm mt-2 max-w-none text-sm"><Markdown>{s.body}</Markdown></div>
+                      <div className="prose prose-sm dark:prose-invert mt-2 max-w-none text-sm"><Markdown>{s.body}</Markdown></div>
                     </details>
                   ))}
             </Section>
