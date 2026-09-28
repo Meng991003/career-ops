@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getApplications, type ListResponse } from '@/lib/api'
-import { applyFilter, EMPTY_FILTER, PRESETS, scoreOf, sortRows, STATUSES, type Filter, type SortKey } from '@/lib/rows'
+import { applyFilter, EMPTY_FILTER, PRESETS, scoreOf, sortRows, STATUSES, viaOf, type Filter, type SortKey } from '@/lib/rows'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -65,7 +65,7 @@ export function ApplicationsTable({ onOpen, refreshKey }: { onOpen: (num: string
             <TableRow key={r['#']} className="cursor-pointer" onClick={() => onOpen(r['#'])}>
               <TableCell className="tabular-nums text-muted-foreground">{r['#']}</TableCell>
               <TableCell className="tabular-nums">{r.Date}</TableCell>
-              <TableCell className="font-medium">{r.Company}{r.Via ? <span className="text-muted-foreground"> via {r.Via}</span> : null}</TableCell>
+              <TableCell className="font-medium">{r.Company}{viaOf(r) ? <span className="text-muted-foreground"> via {viaOf(r)}</span> : null}</TableCell>
               <TableCell className="tabular-nums">{scoreOf(r)?.toFixed(1) ?? '—'}</TableCell>
               <TableCell><Badge variant="secondary">{r.Status}</Badge></TableCell>
               <TableCell className="max-w-md truncate">{r.Role}</TableCell>

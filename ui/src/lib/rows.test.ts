@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyFilter, EMPTY_FILTER, PRESETS, scoreOf, sortRows, type Row } from './rows'
+import { applyFilter, EMPTY_FILTER, PRESETS, scoreOf, sortRows, viaOf, type Row } from './rows'
 
 const row = (o: Partial<Row>): Row => ({ '#': '1', Date: '2026-09-01', Company: 'Acme', Role: 'Dev', Score: '4.2/5', Status: 'Evaluated', Notes: '', ...o })
 const today = new Date('2026-09-28T12:00:00')
@@ -18,6 +18,15 @@ describe('scoreOf', () => {
   })
 })
 
+describe('viaOf', () => {
+  it('treats —, - and blank as no agency', () => {
+    expect(viaOf(row({ Via: '—' }))).toBeNull()
+    expect(viaOf(row({ Via: '-' }))).toBeNull()
+    expect(viaOf(row({ Via: '' }))).toBeNull()
+    expect(viaOf(row({ Via: 'Hays' }))).toBe('Hays')
+  })
+})
+
 describe('applyFilter', () => {
   it('free text matches company, role and notes, case-insensitively', () => {
     expect(nums(applyFilter(rows, { ...EMPTY_FILTER, q: 'front' }, {}, today))).toEqual(['4'])
@@ -29,6 +38,11 @@ describe('applyFilter', () => {
     const f = { ...EMPTY_FILTER, statuses: ['Applied'], appliedOlderThan: 14 }
     expect(nums(applyFilter(rows, f, {}, today))).toEqual(['3'])            // row date 27 days ago
     expect(nums(applyFilter(rows, f, { '3': '2026-09-25' }, today))).toEqual([]) // applied 3 days ago
+  })
+  it('excludes an Applied row whose date is the — sentinel and has no appliedOn entry', () => {
+    const f = { ...EMPTY_FILTER, statuses: ['Applied'], appliedOlderThan: 14 }
+    const withSentinel = [...rows, row({ '#': '5', Status: 'Applied', Date: '—' })]
+    expect(nums(applyFilter(withSentinel, f, {}, today))).toEqual(['3'])
   })
   it('every preset is a valid filter', () => {
     for (const p of PRESETS) expect(Array.isArray(applyFilter(rows, p.filter, {}, today))).toBe(true)

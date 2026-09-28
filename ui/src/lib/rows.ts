@@ -7,6 +7,13 @@ export function scoreOf(r: Row): number | null {
   return m ? Number(m[1]) : null
 }
 
+const NO_VALUE = new Set(['', '—', '-'])
+
+export function viaOf(r: Row): string | null {
+  const v = (r.Via ?? '').trim()
+  return NO_VALUE.has(v) ? null : v
+}
+
 export type Filter = { q: string; statuses: string[]; minScore: number | null; appliedOlderThan: number | null }
 export const EMPTY_FILTER: Filter = { q: '', statuses: [], minScore: null, appliedOlderThan: null }
 
@@ -28,9 +35,10 @@ export function applyFilter(rows: Row[], f: Filter, appliedOn: Record<string, st
     if (f.minScore !== null && (scoreOf(r) ?? -1) < f.minScore) return false
     if (f.appliedOlderThan !== null) {
       const when = appliedOn[r['#']] ?? r.Date // rows applied before the ledger existed fall back to the row date
-      if (!when || daysSince(when, today) <= f.appliedOlderThan) return false
+      const d = daysSince(when, today)
+      if (!when || Number.isNaN(d) || d <= f.appliedOlderThan) return false
     }
-    if (q && ![r.Company, r.Role, r.Notes, r.Via].some(v => v?.toLowerCase().includes(q))) return false
+    if (q && ![r.Company, r.Role, r.Notes, viaOf(r)].some(v => v?.toLowerCase().includes(q))) return false
     return true
   })
 }
