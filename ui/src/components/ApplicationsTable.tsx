@@ -6,9 +6,12 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
-const COLS: { key: SortKey; label: string }[] = [
-  { key: 'num', label: '#' }, { key: 'date', label: 'Date' }, { key: 'company', label: 'Company' },
-  { key: 'score', label: 'Score' }, { key: 'status', label: 'Status' },
+// Short columns first so Score/Status stay visible on narrow windows; the
+// company cell carries the role underneath and wraps; Date hides below sm.
+const COLS: { key: SortKey; label: string; className?: string }[] = [
+  { key: 'num', label: '#' }, { key: 'score', label: 'Score' }, { key: 'status', label: 'Status' },
+  { key: 'company', label: 'Company / role', className: 'w-full' },
+  { key: 'date', label: 'Date', className: 'hidden sm:table-cell' },
 ]
 
 export function ApplicationsTable({ onOpen, refreshKey }: { onOpen: (num: string) => void; refreshKey: number }) {
@@ -52,23 +55,24 @@ export function ApplicationsTable({ onOpen, refreshKey }: { onOpen: (num: string
         <TableHeader>
           <TableRow>
             {COLS.map(c => (
-              <TableHead key={c.key} className="cursor-pointer select-none"
+              <TableHead key={c.key} className={`cursor-pointer select-none ${c.className ?? ''}`}
                 onClick={() => setSort(s => ({ key: c.key, desc: s.key === c.key ? !s.desc : true }))}>
                 {c.label}{sort.key === c.key ? (sort.desc ? ' ↓' : ' ↑') : ''}
               </TableHead>
             ))}
-            <TableHead>Role</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
           {shown.map(r => (
             <TableRow key={r['#']} className="cursor-pointer" onClick={() => onOpen(r['#'])}>
               <TableCell className="tabular-nums text-muted-foreground">{r['#']}</TableCell>
-              <TableCell className="tabular-nums">{r.Date}</TableCell>
-              <TableCell className="font-medium">{r.Company}{viaOf(r) ? <span className="text-muted-foreground"> via {viaOf(r)}</span> : null}</TableCell>
               <TableCell className="tabular-nums">{scoreOf(r)?.toFixed(1) ?? '—'}</TableCell>
               <TableCell><Badge variant="secondary">{r.Status}</Badge></TableCell>
-              <TableCell className="max-w-md truncate">{r.Role}</TableCell>
+              <TableCell className="whitespace-normal [overflow-wrap:anywhere]">
+                <div className="font-medium">{r.Company}{viaOf(r) ? <span className="font-normal text-muted-foreground"> via {viaOf(r)}</span> : null}</div>
+                <div className="text-muted-foreground">{r.Role}</div>
+              </TableCell>
+              <TableCell className="hidden tabular-nums sm:table-cell">{r.Date}</TableCell>
             </TableRow>
           ))}
         </TableBody>
