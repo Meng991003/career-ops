@@ -13,5 +13,5 @@ export function columns(rows: Row[], appliedOn: Record<string, string>): Record<
 }
 
 export function dropMove(from: string, to: string): string | null {
-  return from !== to && BOARD.includes(to) ? to : null
+  return BOARD.includes(from) && from !== to && BOARD.includes(to) ? to : null
 }

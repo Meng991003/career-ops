@@ -19,4 +19,9 @@ describe('dropMove', () => {
     expect(dropMove('Applied', 'Applied')).toBeNull()
     expect(dropMove('Applied', 'Rejected')).toBeNull()
   })
+
+  it('rejects an unknown from (e.g. a missing drag payload)', () => {
+    expect(dropMove(undefined as unknown as string, 'Interview')).toBeNull()
+    expect(dropMove('', 'Interview')).toBeNull()
+  })
 })
