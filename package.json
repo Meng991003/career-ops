@@ -23,6 +23,8 @@
     "verify:portals": "node verify-portals.mjs",
     "tracker": "node tracker.mjs",
     "web": "node server/index.mjs",
+    "ui:dev": "npm --prefix ui run dev",
+    "ui:build": "npm --prefix ui run build",
     "test:server": "for f in server/*-tests.mjs; do node \"$f\" || exit 1; done",
     "patterns": "node analyze-patterns.mjs",
     "gemini:eval": "node gemini-eval.mjs",

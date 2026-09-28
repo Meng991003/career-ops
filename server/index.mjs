@@ -2,13 +2,18 @@
 import http from 'http';
 import { fileURLToPath } from 'url';
 import { dirname, join, normalize } from 'path';
+import { existsSync } from 'fs';
 import { serveStatic, sendJson } from './lib/http.mjs';
 import { REPO_ROOT } from './lib/paths.mjs';
 import { isAllowedRequest } from './lib/guard.mjs';
 import * as setup from './routes/setup.mjs';
 import * as applications from './routes/applications.mjs';
 
-const WEB_DIR = join(REPO_ROOT, 'web');
+// ui/dist (React, built) supersedes the legacy vanilla web/ once it exists.
+// The old Setup screen stays reachable at /legacy until M4 replaces it.
+const UI_DIST = join(REPO_ROOT, 'ui', 'dist');
+const LEGACY_DIR = join(REPO_ROOT, 'web');
+const WEB_DIR = existsSync(join(UI_DIST, 'index.html')) ? UI_DIST : LEGACY_DIR;
 
 // [method, pattern(RegExp), handler(req,res,params)]
 const ROUTES = [
@@ -35,9 +40,18 @@ async function handle(req, res) {
     }
   }
   if (req.method === 'GET') {
-    const rel = url.pathname === '/' ? 'index.html' : normalize(url.pathname).replace(/^[/\\]+/, '');
-    const file = join(WEB_DIR, rel);
-    if (file.startsWith(WEB_DIR) && await serveStatic(res, file)) return;
+    // ponytail: web/index.html loads /style.css and /app.js by absolute path,
+    // so misses in ui/dist fall through to web/. Delete with web/ in M4.
+    const rel = url.pathname === '/' ? 'index.html'
+      : url.pathname === '/legacy' ? null
+      : normalize(url.pathname).replace(/^[/\\]+/, '');
+    if (rel === null) { if (await serveStatic(res, join(LEGACY_DIR, 'index.html'))) return; }
+    else {
+      for (const dir of [WEB_DIR, LEGACY_DIR]) {
+        const file = join(dir, rel);
+        if (file.startsWith(dir) && await serveStatic(res, file)) return;
+      }
+    }
   }
   sendJson(res, 404, { error: 'not found' });
 }

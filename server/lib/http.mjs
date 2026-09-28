@@ -4,7 +4,8 @@ import { writeFile, rename, stat } from 'fs/promises';
 import { dirname, join, extname } from 'path';
 
 const TYPES = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.json':'application/json', '.svg':'image/svg+xml', '.md':'text/markdown' };
+  '.json':'application/json', '.svg':'image/svg+xml', '.md':'text/markdown',
+  '.pdf':'application/pdf', '.png':'image/png', '.ico':'image/x-icon', '.woff2':'font/woff2' };
 
 export function readJsonBody(req) {
   return new Promise((resolve, reject) => {
