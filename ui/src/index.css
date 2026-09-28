@@ -13,6 +13,7 @@
     --font-mono: "Overpass Mono", ui-monospace, monospace;
     --color-line: var(--line);
     --color-signal: var(--signal);
+    --color-mark: var(--mark);
     --color-paper: var(--paper);
     --radius-sm: calc(var(--radius) - 4px);
     --radius-md: calc(var(--radius) - 2px);
@@ -62,6 +63,7 @@
     --rule: #DCE1E8;
     --line: #2855D8;
     --signal: #D99A1E;
+    --mark: #2855D8;
     --radius: 0.5rem;
     --background: var(--paper);
     --foreground: var(--ink);
@@ -104,6 +106,7 @@
     --rule: #253044;
     --line: #7394FF;
     --signal: #F2B743;
+    --mark: #6588F7;
     --background: var(--paper);
     --foreground: var(--ink);
     --card: #151E2C;
