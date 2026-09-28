@@ -29,8 +29,10 @@ export function JobDrawer({ num, onClose, onChanged }: { num: string | null; onC
 
   useEffect(() => {
     if (!num) return
+    let ignore = false
     setD(null); setError(null)
-    getApplication(num).then(setD, e => setError(e.message))
+    getApplication(num).then(v => { if (!ignore) setD(v) }, e => { if (!ignore) setError(e.message) })
+    return () => { ignore = true }
   }, [num, reloadKey])
 
   const reportNum = d?.row.Report?.match(/\[(\d+)\]/)?.[1]
