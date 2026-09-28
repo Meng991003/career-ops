@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import { dirname, join, normalize } from 'path';
 import { serveStatic, sendJson } from './lib/http.mjs';
 import { REPO_ROOT } from './lib/paths.mjs';
+import { isAllowedRequest } from './lib/guard.mjs';
 import * as setup from './routes/setup.mjs';
 import * as applications from './routes/applications.mjs';
 
@@ -23,6 +24,7 @@ const ROUTES = [
 ];
 
 async function handle(req, res) {
+  if (!isAllowedRequest(req)) return sendJson(res, 403, { error: 'forbidden: foreign Host or cross-origin request' });
   const url = new URL(req.url, 'http://localhost');
   for (const [method, pattern, fn] of ROUTES) {
     if (req.method !== method) continue;

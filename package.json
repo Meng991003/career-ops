@@ -23,6 +23,7 @@
     "verify:portals": "node verify-portals.mjs",
     "tracker": "node tracker.mjs",
     "web": "node server/index.mjs",
+    "test:server": "for f in server/*-tests.mjs; do node \"$f\" || exit 1; done",
     "patterns": "node analyze-patterns.mjs",
     "gemini:eval": "node gemini-eval.mjs",
     "postinstall": "npx playwright install chromium --with-deps || npx playwright install chromium --with-deps",
