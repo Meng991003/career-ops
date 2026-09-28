@@ -3,6 +3,7 @@ import Markdown from 'react-markdown'
 import { getApplication, type Detail } from '@/lib/api'
 import { splitReport } from '@/lib/report'
 import { scoreOf } from '@/lib/rows'
+import { StatusEditor } from '@/components/StatusEditor'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
@@ -52,7 +53,8 @@ export function JobDrawer({ num, onClose, onChanged }: { num: string | null; onC
               </SheetDescription>
             </SheetHeader>
 
-            {/* Status + notes editing lands here in Task 9 (StatusEditor). */}
+            <StatusEditor num={d.row['#']} status={d.row.Status}
+              onSaved={() => { setReloadKey(k => k + 1); onChanged() }} />
             <p className="text-sm text-muted-foreground">Notes: {d.row.Notes || '—'}</p>
 
             <Section title="Timeline">
