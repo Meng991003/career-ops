@@ -11,6 +11,17 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@': path.resolve(__dirname, './src') } },
   server: {
-    proxy: { '/api': { target: API, changeOrigin: true, headers: { origin: API } } },
+    proxy: {
+      '/api': {
+        target: API,
+        changeOrigin: true,
+        configure: proxy => proxy.on('proxyReq', (proxyReq, req) => {
+          // Only our own dev page may write: rewrite its Origin to the server's;
+          // strip any other, so the server's guard rejects foreign writes (403).
+          if (/^http:\/\/(localhost|127\.0\.0\.1):5173$/.test(req.headers.origin ?? '')) proxyReq.setHeader('origin', API)
+          else proxyReq.removeHeader('origin')
+        }),
+      },
+    },
   },
 })
