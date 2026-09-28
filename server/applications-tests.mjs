@@ -57,6 +57,15 @@ try {
   ok((await patch(1, {})).status === 400, 'empty body → 400');
   ok((await patch('abc', { status: 'Applied' })).status === 400, 'non-numeric row → 400');
   ok((await patch(3, { status: 'Hired' })).status === 200, 'Hired is accepted (old CANON list omitted it)');
+
+  const list2 = await (await fetch(`${base}/api/applications`)).json();
+  ok(/^\d{4}-\d{2}-\d{2}$/.test(list2.appliedOn?.['2'] ?? ''), 'list returns appliedOn from status-log');
+  const d = await (await fetch(`${base}/api/applications/2`)).json();
+  ok(d.timeline.some(t => t.kind === 'status' && t.detail === 'Evaluated → Applied'), 'detail timeline has the transition');
+  ok(d.documents && 'cv' in d.documents && 'cover' in d.documents, 'detail has documents{cv,cover}');
+  ok(Array.isArray(d.contacts), 'detail has contacts[]');
+  const trav = await fetch(`${base}/api/files/output/..%2F..%2Fcv.md`);
+  ok(trav.status === 404, 'files route blocks path traversal');
 } finally {
   srv.kill();
   rmSync(dir, { recursive: true, force: true });

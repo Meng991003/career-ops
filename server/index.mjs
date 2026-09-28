@@ -8,6 +8,7 @@ import { REPO_ROOT } from './lib/paths.mjs';
 import { isAllowedRequest } from './lib/guard.mjs';
 import * as setup from './routes/setup.mjs';
 import * as applications from './routes/applications.mjs';
+import * as files from './routes/files.mjs';
 
 // ui/dist (React, built) supersedes the legacy vanilla web/ once it exists.
 // The old Setup screen stays reachable at /legacy until M4 replaces it.
@@ -26,6 +27,7 @@ const ROUTES = [
   ['GET',   /^\/api\/applications$/,          applications.list],
   ['GET',   /^\/api\/applications\/([^/]+)$/, applications.getOne],
   ['PATCH', /^\/api\/applications\/([^/]+)$/, applications.patch],
+  ['GET',   /^\/api\/files\/(output|jds)\/(.+)$/, files.get],
 ];
 
 async function handle(req, res) {
