@@ -27,25 +27,7 @@ export function parseTable(markdown) {
   return { headers, rows };
 }
 
-export function serializeRows(headers, rows) {
-  const head = `| ${headers.join(' | ')} |`;
-  const sep = `|${headers.map(() => '---').join('|')}|`;
-  const body = rows.map(r => `| ${headers.map(h => (r[h] ?? '')).join(' | ')} |`);
-  return [head, sep, ...body].join('\n') + '\n';
-}
-
 export function findRowByNum(rows, num) {
   const key = String(num).trim();
   return rows.find(r => String(r['#']).trim() === key);
-}
-
-export function spliceTable(raw, headers, rows) {
-  const lines = raw.split('\n');
-  const isTable = l => l.trim().startsWith('|');
-  const first = lines.findIndex(isTable);
-  if (first === -1) return serializeRows(headers, rows);
-  let last = first;
-  for (let i = lines.length - 1; i >= 0; i--) { if (isTable(lines[i])) { last = i; break; } }
-  const tableLines = serializeRows(headers, rows).replace(/\n$/, '').split('\n');
-  return [...lines.slice(0, first), ...tableLines, ...lines.slice(last + 1)].join('\n');
 }

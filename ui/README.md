@@ -1,32 +1,12 @@
-# React + TypeScript + Vite
+# career-ops UI
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React app for the career-ops applications table and job detail drawer.
 
-Currently, two official plugins are available:
+- `npm run ui:dev` (from the repo root) — Vite on :5173, proxying `/api` to the
+  server on :3700. Start `npm run web` first.
+- `npm run ui:build` (from the repo root) — builds `ui/dist`; the server
+  serves it at `/` once built, falling back to the legacy `web/` UI when not
+  built. The legacy UI is always reachable at `/legacy`.
+- `cd ui && npm test` — Vitest.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
-
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
-
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
-
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+shadcn components were generated with `shadcn@3` — use `npx shadcn@3 add <name>`.
