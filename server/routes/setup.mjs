@@ -2,6 +2,7 @@ import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
 import yaml from 'js-yaml';
+import { parseDocument } from 'yaml';
 import { runScriptJson } from '../lib/run.mjs';
 import { resolveUserPath, REPO_ROOT } from '../lib/paths.mjs';
 import { readJsonBody, readRawBody, sendJson, atomicWrite } from '../lib/http.mjs';
@@ -13,6 +14,14 @@ import { parseList, formatList, parseProofPoints, formatProofPoints } from '../l
 const PROFILE = 'config/profile.yml';
 const PROFILE_EXAMPLE = 'config/profile.example.yml';
 
+// Comment-preserving YAML edit: parse to a Document, set paths, stringify.
+// js-yaml's load→dump round trip drops every comment in the user's file.
+function yamlDoc(text) {
+  const doc = parseDocument(text);
+  const set = (path, value) => doc.setIn(path, doc.createNode(value));
+  return { doc, set, js: doc.toJS() };
+}
+
 // Mirror the preferred-location list into portals.yml's location_filter.allow so
 // the zero-token scanner only surfaces jobs in those places. Reads portals.yml,
 // sets allow, writes it back. No-op (returns false) when there are no locations
@@ -21,10 +30,10 @@ const PROFILE_EXAMPLE = 'config/profile.example.yml';
 async function syncPortalsLocationFilter(locations) {
   const portalsPath = join(REPO_ROOT, 'portals.yml');
   if (!locations.length || !existsSync(portalsPath)) return false;
-  const portals = yaml.load(await readFile(portalsPath, 'utf-8'));
-  if (!portals || typeof portals !== 'object') return false;
-  portals.location_filter = { ...portals.location_filter, allow: locations };
-  await atomicWrite(resolveUserPath('portals.yml'), yaml.dump(portals, { lineWidth: 100 }));
+  const { doc, set, js } = yamlDoc(await readFile(portalsPath, 'utf-8'));
+  if (!js || typeof js !== 'object') return false;
+  set(['location_filter', 'allow'], locations);
+  await atomicWrite(resolveUserPath('portals.yml'), String(doc));
   return true;
 }
 
@@ -46,28 +55,27 @@ export async function postProfile(req, res) {
   // cover are preserved; fall back to the example template for a fresh setup.
   const profilePath = join(REPO_ROOT, PROFILE);
   const src = existsSync(profilePath) ? profilePath : join(REPO_ROOT, PROFILE_EXAMPLE);
-  const profile = yaml.load(await readFile(src, 'utf-8'));
+  const { doc, set, js: profile } = yamlDoc(await readFile(src, 'utf-8'));
   if (!profile || !profile.candidate || !profile.target_roles || !profile.location || !profile.compensation) {
     return sendJson(res, 500, { error: 'profile template is missing or malformed' });
   }
-  profile.narrative = profile.narrative || {};
-  profile.candidate.full_name = b.full_name ?? profile.candidate.full_name;
-  profile.candidate.email = b.email ?? profile.candidate.email;
-  profile.candidate.location = b.location ?? profile.candidate.location;
-  if (b.phone) profile.candidate.phone = b.phone;
-  if (b.linkedin) profile.candidate.linkedin = b.linkedin;
-  if (b.github) profile.candidate.github = b.github;
-  if (Array.isArray(b.target_roles)) profile.target_roles.primary = b.target_roles;
-  if (b.timezone) profile.location.timezone = b.timezone;
-  if (b.salary_target) profile.compensation.target_range = b.salary_target;
-  if (b.salary_period) profile.compensation.period = b.salary_period;
-  if (b.preferred_location) profile.location.preferred = b.preferred_location;
+  if (b.full_name !== undefined) set(['candidate', 'full_name'], b.full_name);
+  if (b.email !== undefined) set(['candidate', 'email'], b.email);
+  if (b.location !== undefined) set(['candidate', 'location'], b.location);
+  if (b.phone) set(['candidate', 'phone'], b.phone);
+  if (b.linkedin) set(['candidate', 'linkedin'], b.linkedin);
+  if (b.github) set(['candidate', 'github'], b.github);
+  if (Array.isArray(b.target_roles)) set(['target_roles', 'primary'], b.target_roles);
+  if (b.timezone) set(['location', 'timezone'], b.timezone);
+  if (b.salary_target) set(['compensation', 'target_range'], b.salary_target);
+  if (b.salary_period) set(['compensation', 'period'], b.salary_period);
+  if (b.preferred_location) set(['location', 'preferred'], b.preferred_location);
   // Narrative fields are authoritative from the form (sent as raw text every save).
-  if (b.headline !== undefined) profile.narrative.headline = b.headline;
-  if (b.exit_story !== undefined) profile.narrative.exit_story = b.exit_story;
-  if (b.superpowers !== undefined) profile.narrative.superpowers = parseList(b.superpowers);
-  if (b.proof_points !== undefined) profile.narrative.proof_points = parseProofPoints(b.proof_points);
-  await atomicWrite(resolveUserPath(PROFILE), yaml.dump(profile, { lineWidth: 100 }));
+  if (b.headline !== undefined) set(['narrative', 'headline'], b.headline);
+  if (b.exit_story !== undefined) set(['narrative', 'exit_story'], b.exit_story);
+  if (b.superpowers !== undefined) set(['narrative', 'superpowers'], parseList(b.superpowers));
+  if (b.proof_points !== undefined) set(['narrative', 'proof_points'], parseProofPoints(b.proof_points));
+  await atomicWrite(resolveUserPath(PROFILE), String(doc));
   // Keep the scanner's location filter in step with the stated preference.
   await syncPortalsLocationFilter(parsePreferredLocations(b.preferred_location));
   sendJson(res, 200, { ok: true });
@@ -100,14 +108,16 @@ export async function getData(req, res) {
 
 export async function postPortals(req, res) {
   const b = await readJsonBody(req);
-  const example = await readFile(join(REPO_ROOT, 'templates/portals.example.yml'), 'utf-8');
-  const portals = yaml.load(example);
-  if (!portals || typeof portals !== 'object') {
-    return sendJson(res, 500, { error: 'portals.example.yml template is missing or malformed' });
+  // Base off the user's EXISTING portals.yml — rebuilding from the example
+  // template on every save dropped their tracked_companies and filters.
+  const portalsPath = join(REPO_ROOT, 'portals.yml');
+  const src = existsSync(portalsPath) ? portalsPath : join(REPO_ROOT, 'templates/portals.example.yml');
+  const { doc, set, js } = yamlDoc(await readFile(src, 'utf-8'));
+  if (!js || typeof js !== 'object') {
+    return sendJson(res, 500, { error: 'portals.yml is missing or malformed' });
   }
   if (Array.isArray(b.positiveKeywords) && b.positiveKeywords.length) {
-    portals.title_filter = portals.title_filter || {};
-    portals.title_filter.positive = b.positiveKeywords;
+    set(['title_filter', 'positive'], b.positiveKeywords);
   }
   // Seed the location filter from the user's saved preferred location, so a
   // Save Portals after Save Profile still applies it (and vice-versa).
@@ -115,9 +125,9 @@ export async function postPortals(req, res) {
   if (existsSync(profilePath)) {
     const prof = yaml.load(await readFile(profilePath, 'utf-8'));
     const locs = parsePreferredLocations(prof?.location?.preferred);
-    if (locs.length) portals.location_filter = { ...portals.location_filter, allow: locs };
+    if (locs.length) set(['location_filter', 'allow'], locs);
   }
-  await atomicWrite(resolveUserPath('portals.yml'), yaml.dump(portals, { lineWidth: 100 }));
+  await atomicWrite(resolveUserPath('portals.yml'), String(doc));
   sendJson(res, 200, { ok: true });
 }
 

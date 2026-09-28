@@ -86,6 +86,16 @@ try {
   ok(JSON.stringify(savedPortals.location_filter?.allow) === JSON.stringify(['Penang', 'Remote']),
     'preferred location mirrored into portals.yml location_filter.allow');
 
+  // Comments must survive a save (js-yaml dump used to strip all of them).
+  const firstComment = s => s?.toString().split('\n').find(l => l.trim().startsWith('#'));
+  const profComment = firstComment(origProfile);
+  if (profComment) ok(readFileSync(profilePath, 'utf-8').includes(profComment), 'profile.yml comments survive a save');
+  const portComment = firstComment(origPortals);
+  if (portComment) ok(readFileSync(portalsPath, 'utf-8').includes(portComment), 'portals.yml comments survive a save');
+  // Save Portals must not reset the user's tracked companies to the template.
+  const origCompanies = origPortals ? (yaml.load(origPortals.toString())?.tracked_companies ?? []).length : 0;
+  if (origCompanies) ok((savedPortals.tracked_companies ?? []).length === origCompanies, 'portals save keeps tracked_companies');
+
   // Prefill endpoint reflects saved data.
   const data1 = await (await fetch(`${base}/api/setup/data`)).json();
   ok(data1.preferred_location === 'Penang / Remote', 'GET /api/setup/data returns saved preferred_location');
