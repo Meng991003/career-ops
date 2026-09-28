@@ -37,17 +37,17 @@ export type Today = {
   worthApplying: { total: number; items: { num: string; company: string; role: string; score: number }[] }
   digest: { date: string; total: number; items: DigestJob[] } | null
   quietInterviews: QuietInterview[]
-  funnel: { everApplied: number; everResponded: number; everInterview: number; everOffer: number; responseRate: number; interviewRate: number; offerRate: number }
-  calibration: { responseRate?: RateCalibration; interviewRate?: RateCalibration }
+  funnel: { everApplied: number; everResponded: number; everInterview: number; everOffer: number; responseRate: number; interviewRate: number; offerRate: number } | null
+  calibration: { responseRate?: RateCalibration; interviewRate?: RateCalibration } | null
 }
 export type Hop = { from: string; to: string; n: number; median: number | null; p75: number | null; insufficientData: boolean }
 export type StatsResponse = {
   stats: {
-    tracker: { total: number; byStatus: Record<string, number>; avgScore: number; avgScoreApplied: number; topScore: number }
+    tracker: { total: number; byStatus: Record<string, number>; avgScore: number | null; avgScoreApplied: number | null; topScore: number | null } | null
     funnel: Today['funnel']
-    scan: { totalRecorded: number; distinctCompanies: number; firstSeen: string; lastSeen: string; addedPerWeek: { week: string; count: number }[]; byPortal: Record<string, number> }
+    scan: { totalRecorded: number; distinctCompanies: number; firstSeen: string; lastSeen: string; addedPerWeek: { week: string; count: number }[]; byPortal: Record<string, number> } | null
   }
-  velocity: { calibration: Today['calibration']; velocity: Record<string, Hop> }
+  velocity: { calibration: Today['calibration']; velocity: Record<string, Hop> | null }
 }
 
 export const getToday = () => call<Today>('/api/today')
