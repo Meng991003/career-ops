@@ -58,21 +58,26 @@ export function StatsPage() {
     <>
       <H2>Funnel</H2>
       {funnel ? (
-        <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Tile label="Applied" value={funnel.everApplied} />
-            <Tile label="Replied" value={funnel.everResponded} />
-            <Tile label="Interviewed" value={funnel.everInterview} />
-            <Tile label="Offers" value={funnel.everOffer} />
-          </div>
-          <div className="mt-3 grid gap-3 md:grid-cols-2">
-            <Rate name="Reply rate" c={cal?.responseRate} />
-            <Rate name="Interview rate" c={cal?.interviewRate} />
-          </div>
-        </>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Tile label="Applied" value={funnel.everApplied} />
+          <Tile label="Replied" value={funnel.everResponded} />
+          <Tile label="Interviewed" value={funnel.everInterview} />
+          <Tile label="Offers" value={funnel.everOffer} />
+        </div>
       ) : (
         <Empty>No tracker yet — evaluate a job to start.</Empty>
       )}
+
+      <div className="mt-3">
+        {cal?.responseRate || cal?.interviewRate ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            <Rate name="Reply rate" c={cal?.responseRate} />
+            <Rate name="Interview rate" c={cal?.interviewRate} />
+          </div>
+        ) : (
+          <Empty>Reply and interview rates appear once you have enough applications to compare.</Empty>
+        )}
+      </div>
 
       <H2>Time between stages</H2>
       {velocity ? (
