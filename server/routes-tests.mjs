@@ -110,6 +110,15 @@ try {
   ok(data2.superpowers === 'Debugging\nVue/.NET', 'superpowers round-trip as text');
   ok(data2.proof_points === 'Perf | 30% gains | https://x', 'proof points round-trip as text');
   ok(data2.salary_period === 'monthly', 'base-off-existing preserves salary_period across a narrative-only save');
+
+  const cvBefore = readFileSync(cvPath, 'utf-8');
+  const stale = await jsonPost('/api/setup/cv', { markdown: '# overwritten', version: 'not-the-real-version' });
+  ok(stale.status === 409, 'stale cv version → 409');
+  ok(readFileSync(cvPath, 'utf-8') === cvBefore, '409 leaves cv.md untouched');
+  const { versions } = await (await fetch(`${base}/api/setup/data`)).json();
+  ok(typeof versions?.cv === 'string', 'GET /api/setup/data returns versions.cv');
+  const fresh = await jsonPost('/api/setup/cv', { markdown: cvBefore, version: versions.cv });
+  ok(fresh.status === 200, 'current cv version → 200');
 } finally {
   srv.kill();
   restore(cvPath, origCv);

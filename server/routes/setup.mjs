@@ -10,6 +10,7 @@ import { extractText } from '../lib/resume-extract.mjs';
 import { extractFields } from '../lib/resume-fields.mjs';
 import { parsePreferredLocations } from '../lib/locations.mjs';
 import { parseList, formatList, parseProofPoints, formatProofPoints } from '../lib/narrative.mjs';
+import { fileVersion, isStale } from '../lib/versioned.mjs';
 
 const PROFILE = 'config/profile.yml';
 const PROFILE_EXAMPLE = 'config/profile.example.yml';
@@ -20,6 +21,14 @@ function yamlDoc(text) {
   const doc = parseDocument(text);
   const set = (path, value) => doc.setIn(path, doc.createNode(value));
   return { doc, set, js: doc.toJS() };
+}
+
+// 409 guard shared by the whole-file writers. Returns true when it responded.
+async function rejectIfStale(res, relPath, version) {
+  const abs = join(REPO_ROOT, relPath);
+  if (!(await isStale(abs, version))) return false;
+  sendJson(res, 409, { error: 'changed on disk — reload', currentVersion: await fileVersion(abs) });
+  return true;
 }
 
 // Mirror the preferred-location list into portals.yml's location_filter.allow so
@@ -43,14 +52,16 @@ export async function getStatus(req, res) {
 }
 
 export async function postCv(req, res) {
-  const { markdown } = await readJsonBody(req);
+  const { markdown, version } = await readJsonBody(req);
   if (!markdown || !markdown.trim()) return sendJson(res, 400, { error: 'markdown required' });
+  if (await rejectIfStale(res, 'cv.md', version)) return;
   await atomicWrite(resolveUserPath('cv.md'), markdown);
   sendJson(res, 200, { ok: true });
 }
 
 export async function postProfile(req, res) {
   const b = await readJsonBody(req);
+  if (await rejectIfStale(res, PROFILE, b.version)) return;
   // Base off the user's EXISTING profile when present so fields the form doesn't
   // cover are preserved; fall back to the example template for a fresh setup.
   const profilePath = join(REPO_ROOT, PROFILE);
@@ -103,11 +114,17 @@ export async function getData(req, res) {
     headline: nar.headline || '', exit_story: nar.exit_story || '',
     superpowers: formatList(nar.superpowers), proof_points: formatProofPoints(nar.proof_points),
     keywords: Array.isArray(keywords) ? keywords.join(', ') : '',
+    versions: {
+      cv: await fileVersion(join(REPO_ROOT, 'cv.md')),
+      profile: await fileVersion(join(REPO_ROOT, PROFILE)),
+      portals: await fileVersion(join(REPO_ROOT, 'portals.yml')),
+    },
   });
 }
 
 export async function postPortals(req, res) {
   const b = await readJsonBody(req);
+  if (await rejectIfStale(res, 'portals.yml', b.version)) return;
   // Base off the user's EXISTING portals.yml — rebuilding from the example
   // template on every save dropped their tracked_companies and filters.
   const portalsPath = join(REPO_ROOT, 'portals.yml');
