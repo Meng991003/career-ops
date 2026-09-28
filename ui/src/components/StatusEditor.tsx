@@ -13,14 +13,16 @@ export function StatusEditor({ num, status, onSaved }: { num: string; status: st
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
 
-  async function save(body: { status?: string; note?: string }, done: string) {
+  async function save(body: { status?: string; note?: string }, done: string): Promise<boolean> {
     setBusy(true)
     try {
       await patchApplication(num, body)
       toast.success(done)
       onSaved()
+      return true
     } catch (e) {
       toast.error((e as Error).message)
+      return false
     } finally {
       setBusy(false)
     }
@@ -39,7 +41,7 @@ export function StatusEditor({ num, status, onSaved }: { num: string; status: st
         <Textarea placeholder="Add a note (appended to the existing notes)" value={note} disabled={busy}
           onChange={e => setNote(e.target.value)} />
         <Button size="sm" disabled={busy || !note.trim()}
-          onClick={() => save({ note: note.trim() }, 'Note added').then(() => setNote(''))}>Add note</Button>
+          onClick={async () => { if (await save({ note: note.trim() }, 'Note added')) setNote('') }}>Add note</Button>
       </div>
     </div>
   )
