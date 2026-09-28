@@ -7,7 +7,8 @@ export function runScript(script, args = [], { timeout = 120000 } = {}) {
     execFile(process.execPath, [join(REPO_ROOT, script), ...args],
       { cwd: REPO_ROOT, timeout, encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024 },
       (err, stdout, stderr) => {
-        resolve({ code: err?.code ?? 0, stdout: stdout || '', stderr: stderr || (err?.message ?? '') });
+        const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
+        resolve({ code, stdout: stdout || '', stderr: stderr || (err?.message ?? '') });
       });
   });
 }
