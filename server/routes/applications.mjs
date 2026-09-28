@@ -87,6 +87,9 @@ export async function patch(req, res, [num]) {
   if (!status) {
     // set-status needs a state with --row; restating the current one is a
     // no-op for status and logs no transition.
+    // ponytail: read-then-resend race — a status change landing between this
+    // read and set-status's write is reverted by our resend. Upgrade path:
+    // a note-only mode in set-status that skips the status arg entirely.
     const row = findRowByNum((await loadTracker()).rows, num);
     if (!row) return sendJson(res, 404, { error: `no tracker row #${num}` });
     status = row['Status'];
