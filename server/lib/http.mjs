@@ -4,7 +4,8 @@ import { writeFile, rename, stat } from 'fs/promises';
 import { dirname, join, extname } from 'path';
 
 const TYPES = { '.html':'text/html', '.js':'text/javascript', '.css':'text/css',
-  '.json':'application/json', '.svg':'image/svg+xml', '.md':'text/markdown',
+  '.json':'application/json', '.svg':'image/svg+xml', '.md':'text/markdown; charset=utf-8',
+  '.txt':'text/plain; charset=utf-8',
   '.pdf':'application/pdf', '.png':'image/png', '.ico':'image/x-icon', '.woff2':'font/woff2' };
 
 export function readJsonBody(req) {
@@ -50,12 +51,12 @@ export function sendJson(res, status, obj) {
   res.end(body);
 }
 
-export async function serveStatic(res, absFile) {
+export async function serveStatic(res, absFile, extraHeaders = {}) {
   try {
     const s = await stat(absFile);
     if (!s.isFile()) return false;
   } catch { return false; }
-  res.writeHead(200, { 'content-type': TYPES[extname(absFile)] || 'application/octet-stream' });
+  res.writeHead(200, { 'content-type': TYPES[extname(absFile)] || 'application/octet-stream', ...extraHeaders });
   createReadStream(absFile).pipe(res);
   return true;
 }

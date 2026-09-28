@@ -5,7 +5,7 @@
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
-import { mkdtempSync, copyFileSync, readFileSync, existsSync, rmSync } from 'fs';
+import { mkdtempSync, copyFileSync, readFileSync, existsSync, rmSync, mkdirSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -66,6 +66,22 @@ try {
   ok(Array.isArray(d.contacts), 'detail has contacts[]');
   const trav = await fetch(`${base}/api/files/output/..%2F..%2Fcv.md`);
   ok(trav.status === 404, 'files route blocks path traversal');
+
+  const fixtureDir = join(ROOT, 'output/zz-test-fixture');
+  mkdirSync(fixtureDir, { recursive: true });
+  writeFileSync(join(fixtureDir, 'x.html'), '<script>alert(1)</script>');
+  writeFileSync(join(fixtureDir, 'x.pdf'), '%PDF-1.4 fake');
+  try {
+    const htmlRes = await fetch(`${base}/api/files/output/zz-test-fixture/x.html`);
+    ok(htmlRes.status === 404, 'files route 404s non-allowlisted extensions (.html)');
+
+    const pdfRes = await fetch(`${base}/api/files/output/zz-test-fixture/x.pdf`);
+    ok(pdfRes.status === 200, 'files route 200s an allowlisted .pdf');
+    ok(pdfRes.headers.get('content-type') === 'application/pdf', 'pdf served with content-type: application/pdf');
+    ok((pdfRes.headers.get('content-security-policy') || '').includes('sandbox'), 'pdf response carries a sandboxing CSP');
+  } finally {
+    rmSync(fixtureDir, { recursive: true, force: true });
+  }
 } finally {
   srv.kill();
   rmSync(dir, { recursive: true, force: true });
