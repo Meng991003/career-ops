@@ -2,15 +2,18 @@
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { parseTable, serializeRows, findRowByNum, spliceTable } from '../lib/markdown-table.mjs';
-import { resolveUserPath, REPO_ROOT } from '../lib/paths.mjs';
-import { readJsonBody, sendJson, atomicWrite } from '../lib/http.mjs';
+import { parseTable, findRowByNum } from '../lib/markdown-table.mjs';
+import { REPO_ROOT } from '../lib/paths.mjs';
+import { readJsonBody, sendJson } from '../lib/http.mjs';
+import { runScript } from '../lib/run.mjs';
+import { resolveTrackerPath, getCareerOpsRoot } from '../../path-resolver.mjs';
 
-const TRACKER = 'data/applications.md';
-const CANON = ['Evaluated','Applied','Responded','Interview','Offer','Rejected','Discarded','SKIP'];
+// set-status.mjs exit codes → HTTP. It owns validation, the tracker lock, the
+// atomic write and the status-log.tsv ledger; this route only translates.
+const EXIT_HTTP = { 1: 400, 2: 404, 3: 409, 4: 503 };
 
 async function loadTracker() {
-  const abs = join(REPO_ROOT, TRACKER);
+  const abs = resolveTrackerPath(getCareerOpsRoot());
   if (!existsSync(abs)) return { headers: [], rows: [], abs, raw: '' };
   const raw = await readFile(abs, 'utf-8');
   return { ...parseTable(raw), abs, raw };
@@ -43,15 +46,22 @@ export async function getOne(req, res, [num]) {
 }
 
 export async function patch(req, res, [num]) {
+  if (!/^\d+$/.test(num)) return sendJson(res, 400, { error: 'row number must be a positive integer' });
   const body = await readJsonBody(req);
-  if (body.status && !CANON.some(c => c.toLowerCase() === String(body.status).toLowerCase())) {
-    return sendJson(res, 400, { error: `non-canonical status: ${body.status}` });
+  const note = typeof body.note === 'string' ? body.note.trim() : '';
+  let status = typeof body.status === 'string' ? body.status.trim() : '';
+  if (!status && !note) return sendJson(res, 400, { error: 'status or note required' });
+  if (!status) {
+    // set-status needs a state with --row; restating the current one is a
+    // no-op for status and logs no transition.
+    const row = findRowByNum((await loadTracker()).rows, num);
+    if (!row) return sendJson(res, 404, { error: `no tracker row #${num}` });
+    status = row['Status'];
   }
-  const { headers, rows, raw } = await loadTracker();
-  const row = findRowByNum(rows, num);
-  if (!row) return sendJson(res, 404, { error: 'not found' });
-  if (body.status) row['Status'] = CANON.find(c => c.toLowerCase() === String(body.status).toLowerCase());
-  if (body.notes !== undefined) row['Notes'] = String(body.notes).replace(/\n/g, ' ');
-  await atomicWrite(resolveUserPath(TRACKER), spliceTable(raw, headers, rows));
-  sendJson(res, 200, { ok: true, row });
+  const args = ['--row', num, status, '--source', 'web', '--json'];
+  if (note) args.push('--note', note);
+  const { code, stdout, stderr } = await runScript('set-status.mjs', args);
+  let out;
+  try { out = JSON.parse(stdout); } catch { out = { error: (stderr || stdout).trim() || 'set-status failed' }; }
+  sendJson(res, code === 0 ? 200 : (EXIT_HTTP[code] ?? 500), out);
 }
