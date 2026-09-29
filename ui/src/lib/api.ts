@@ -28,17 +28,18 @@ export const patchApplication = (num: string, body: { status?: string; note?: st
     body: JSON.stringify(body),
   })
 
-export type FollowUp = { num: string; company: string; role: string; score: number | null; daysSinceApplication: number; daysOverdue: number; hasContact: boolean }
+export type FollowUp = { num: string; company: string; role: string; score: number | null; daysSinceApplication: number; urgency: string; daysUntilNext: number | null; hasContact: boolean }
 export type DigestJob = { title: string; company: string; url: string; location: string; salary: string | null; postedAt: string | null; applyRoute: string | null; triage: number; source: string }
 export type RateCalibration = { band: string; ownPct: number; rangePct: [number, number]; typicalPct: number; source: string; caveat: string }
-export type QuietInterview = { company: string; role: string; trackerNums: string[]; lastInterviewDate: string; daysSinceLastInterview: number }
+export type QuietInterview = { company: string; role: string; trackerNums: (string | number)[]; lastInterviewDate: string; daysSinceLastInterview: number }
 export type Today = {
   followUps: { total: number; items: FollowUp[] }
   worthApplying: { total: number; items: { num: string; company: string; role: string; score: number }[] }
   digest: { date: string; total: number; items: DigestJob[] } | null
   quietInterviews: QuietInterview[]
   funnel: { everApplied: number; everResponded: number; everInterview: number; everOffer: number; responseRate: number; interviewRate: number; offerRate: number } | null
-  calibration: { responseRate?: RateCalibration; interviewRate?: RateCalibration } | null
+  calibration: { responseRate?: RateCalibration; interviewRate?: RateCalibration; smallSample: boolean; everApplied: number; claimMinN: number } | null
+  warnings: string[]
 }
 export type Hop = { from: string; to: string; n: number; median: number | null; p75: number | null; insufficientData: boolean }
 export type StatsResponse = {
@@ -46,8 +47,9 @@ export type StatsResponse = {
     tracker: { total: number; byStatus: Record<string, number>; avgScore: number | null; avgScoreApplied: number | null; topScore: number | null } | null
     funnel: Today['funnel']
     scan: { totalRecorded: number; distinctCompanies: number; firstSeen: string; lastSeen: string; addedPerWeek: { week: string; count: number }[]; byPortal: Record<string, number> } | null
-  }
-  velocity: { calibration: Today['calibration']; velocity: Record<string, Hop> | null }
+  } | null
+  velocity: { calibration: Today['calibration']; velocity: Record<string, Hop> | null } | null
+  warnings: string[]
 }
 
 export const getToday = () => call<Today>('/api/today')

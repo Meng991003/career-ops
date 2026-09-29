@@ -15,7 +15,7 @@ export function BoardPage({ onOpen, refreshKey }: { onOpen: (num: string) => voi
   const [error, setError] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
   const [reload, setReload] = useState(0)
-  useEffect(() => { getApplications().then(setData, e => setError(e.message)) }, [refreshKey, reload])
+  useEffect(() => { setError(null); getApplications().then(setData, e => setError(e.message)) }, [refreshKey, reload])
   const cols = useMemo(() => (data ? columns(data.rows, data.appliedOn) : null), [data])
   const appliedOn = data?.appliedOn ?? {}
 

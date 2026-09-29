@@ -19,7 +19,7 @@ function Tile({ label, value }: { label: string; value: string | number }) {
   )
 }
 
-function Rate({ name, c }: { name: string; c?: RateCalibration }) {
+function Rate({ name, c, smallSample, everApplied }: { name: string; c?: RateCalibration; smallSample?: boolean; everApplied?: number }) {
   if (!c) return null
   return (
     <div className="rounded-xl border bg-card px-4 py-3 text-sm">
@@ -28,7 +28,9 @@ function Rate({ name, c }: { name: string; c?: RateCalibration }) {
         <span className="font-mono">{c.ownPct}%</span>
       </div>
       <p className="mt-1 text-muted-foreground">
-        Typical {c.rangePct[0]}–{c.rangePct[1]}% — you are {c.band === 'below-range' ? 'below' : c.band === 'above-range' ? 'above' : 'within'} the range.
+        {smallSample
+          ? `Small sample (n=${everApplied}) — directional only.`
+          : <>Typical {c.rangePct[0]}–{c.rangePct[1]}% — you are {c.band === 'below-range' ? 'below' : c.band === 'above-range' ? 'above' : 'within'} the range.</>}
       </p>
       <p className="mt-1 text-xs text-muted-foreground">{c.source}. {c.caveat}</p>
     </div>
@@ -51,11 +53,14 @@ export function StatsPage() {
   if (error) return <p className="rounded-lg border border-destructive/30 bg-card p-4 text-sm text-destructive">Couldn't load stats: {error}</p>
   if (!s) return <p className="text-sm text-muted-foreground">Crunching the numbers…</p>
 
-  const { tracker, funnel, scan } = s.stats
-  const cal = s.velocity.calibration
-  const velocity = s.velocity.velocity
+  const { tracker, funnel, scan } = s.stats ?? { tracker: null, funnel: null, scan: null }
+  const cal = s.velocity?.calibration
+  const velocity = s.velocity?.velocity
   return (
     <>
+      {s.warnings.length > 0 && (
+        <p className="mb-4 text-sm text-muted-foreground">Some figures are missing because {s.warnings.join(', ')} couldn't run. Check the server log.</p>
+      )}
       <H2>Funnel</H2>
       {funnel ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -71,8 +76,8 @@ export function StatsPage() {
       <div className="mt-3">
         {cal?.responseRate || cal?.interviewRate ? (
           <div className="grid gap-3 md:grid-cols-2">
-            <Rate name="Reply rate" c={cal?.responseRate} />
-            <Rate name="Interview rate" c={cal?.interviewRate} />
+            <Rate name="Reply rate" c={cal?.responseRate} smallSample={cal?.smallSample} everApplied={cal?.everApplied} />
+            <Rate name="Interview rate" c={cal?.interviewRate} smallSample={cal?.smallSample} everApplied={cal?.everApplied} />
           </div>
         ) : (
           <Empty>Reply and interview rates appear once you have enough applications to compare.</Empty>

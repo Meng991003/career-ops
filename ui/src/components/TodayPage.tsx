@@ -1,8 +1,16 @@
 import { useEffect, useState } from 'react'
-import { getToday, type Today, type RateCalibration } from '@/lib/api'
+import { getToday, type Today, type FollowUp } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 
 const ROUTE_LABEL: Record<string, string> = { open: 'Open to apply', 'likely-gated': 'Check apply button', unknown: 'Route unknown' }
+
+function followUpLabel(f: FollowUp): string {
+  if (f.urgency === 'urgent') return 'reply soon'
+  if (f.daysUntilNext === null) return 'follow-up due'
+  if (f.daysUntilNext === 0) return 'due today'
+  if (f.daysUntilNext < 0) return `${-f.daysUntilNext}d overdue`
+  return `due in ${f.daysUntilNext}d`
+}
 
 function Card({ title, count, children, footer }: { title: string; count?: number; children: React.ReactNode; footer?: React.ReactNode }) {
   return (
@@ -27,7 +35,17 @@ function RowButton({ onClick, children }: { onClick: () => void; children: React
   return <button type="button" onClick={onClick} className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-accent/60">{children}</button>
 }
 
-function Funnel({ f, rr }: { f: NonNullable<Today['funnel']>; rr?: RateCalibration }) {
+function calibrationSentence(cal: NonNullable<Today['calibration']>): string {
+  const rr = cal.responseRate
+  if (!rr) return ''
+  if (cal.smallSample) return `${rr.ownPct}% of applications got a reply — too few so far (n=${cal.everApplied}) to compare with the typical range.`
+  const range = `Typical is ${rr.rangePct[0]}–${rr.rangePct[1]}%`
+  if (rr.band === 'below-range') return `${rr.ownPct}% of applications got a reply. ${range} — worth changing what you send, not how much.`
+  if (rr.band === 'above-range') return `${rr.ownPct}% of applications got a reply. ${range} — you're doing better than most.`
+  return `${rr.ownPct}% of applications got a reply. ${range}.`
+}
+
+function Funnel({ f, cal }: { f: NonNullable<Today['funnel']>; cal: Today['calibration'] }) {
   const steps = [['Applied', f.everApplied], ['Responded', f.everResponded], ['Interviewed', f.everInterview], ['Offers', f.everOffer]] as const
   return (
     <section aria-label="Funnel" className="mb-6 flex flex-wrap items-end gap-x-8 gap-y-4 rounded-xl border bg-card px-5 py-4">
@@ -37,12 +55,12 @@ function Funnel({ f, rr }: { f: NonNullable<Today['funnel']>; rr?: RateCalibrati
           <div className="mt-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
         </div>
       ))}
-      {rr && (
+      {cal?.responseRate && (
         <p className="max-w-sm text-sm text-muted-foreground sm:ml-auto">
-          <span className="font-mono text-foreground">{rr.ownPct}%</span> of applications got a reply.
-          Typical is {rr.rangePct[0]}–{rr.rangePct[1]}%{rr.band === 'below-range' ? ' — worth changing what you send, not how much.' : '.'}
+          {calibrationSentence(cal)}
         </p>
       )}
+      <a href="#/stats" className="text-line text-sm hover:underline">Full stats →</a>
     </section>
   )
 }
@@ -50,7 +68,7 @@ function Funnel({ f, rr }: { f: NonNullable<Today['funnel']>; rr?: RateCalibrati
 export function TodayPage({ onOpen, refreshKey }: { onOpen: (num: string) => void; refreshKey: number }) {
   const [t, setT] = useState<Today | null>(null)
   const [error, setError] = useState<string | null>(null)
-  useEffect(() => { getToday().then(setT, e => setError(e.message)) }, [refreshKey])
+  useEffect(() => { setError(null); getToday().then(setT, e => setError(e.message)) }, [refreshKey])
 
   if (error) return <p className="rounded-lg border border-destructive/30 bg-card p-4 text-sm text-destructive">Couldn't build today's view: {error}. Check that the career-ops server is running, then reload.</p>
   if (!t) return <p className="text-sm text-muted-foreground">Gathering today's view — this runs a few scripts and takes a second or two…</p>
@@ -59,7 +77,10 @@ export function TodayPage({ onOpen, refreshKey }: { onOpen: (num: string) => voi
 
   return (
     <>
-      {t.funnel && <Funnel f={t.funnel} rr={t.calibration?.responseRate} />}
+      {t.warnings.length > 0 && (
+        <p className="mb-4 text-sm text-muted-foreground">Some figures are missing because {t.warnings.join(', ')} couldn't run. Check the server log.</p>
+      )}
+      {t.funnel && <Funnel f={t.funnel} cal={t.calibration} />}
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="Follow-ups due" count={t.followUps.total}
           footer={t.followUps.total > t.followUps.items.length && (
@@ -73,7 +94,7 @@ export function TodayPage({ onOpen, refreshKey }: { onOpen: (num: string) => voi
                 <span className="block truncate text-xs text-muted-foreground">{f.role}</span>
               </span>
               <span className="shrink-0 text-right text-xs text-muted-foreground">
-                <span className="block font-mono">{f.daysOverdue}d overdue</span>
+                <span className="block font-mono">{followUpLabel(f)}</span>
                 {!f.hasContact && <span className="block">no contact</span>}
               </span>
             </RowButton>
@@ -101,7 +122,7 @@ export function TodayPage({ onOpen, refreshKey }: { onOpen: (num: string) => voi
                 <span className="min-w-0 flex-1">
                   <a href={j.url} target="_blank" rel="noreferrer" className="block truncate font-medium hover:text-line">{j.title}</a>
                   <span className="block truncate text-xs text-muted-foreground">
-                    {j.company || 'Company not shown'} · {j.source}{j.salary ? ` · ${j.salary}` : ''}
+                    {j.company || 'Company not shown'} · {j.source} · triage {j.triage}{j.salary ? ` · ${j.salary}` : ''}
                   </span>
                   {j.applyRoute && j.applyRoute !== 'open' && <span className="text-xs text-muted-foreground">{ROUTE_LABEL[j.applyRoute] ?? j.applyRoute}</span>}
                 </span>
