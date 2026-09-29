@@ -33,10 +33,11 @@ export type DigestJob = { title: string; company: string; url: string; location:
 export type RateCalibration = { band: string; ownPct: number; rangePct: [number, number]; typicalPct: number; source: string; caveat: string }
 export type QuietInterview = { company: string; role: string; trackerNums: (string | number)[]; lastInterviewDate: string; daysSinceLastInterview: number }
 export type Today = {
-  followUps: { total: number; items: FollowUp[] }
+  followUps: { total: number; live: number; items: FollowUp[] }
   worthApplying: { total: number; items: { num: string; company: string; role: string; score: number }[] }
   digest: { date: string; total: number; items: DigestJob[] } | null
   quietInterviews: QuietInterview[]
+  pipeline: Record<string, number> | null
   funnel: { everApplied: number; everResponded: number; everInterview: number; everOffer: number; responseRate: number; interviewRate: number; offerRate: number } | null
   calibration: { responseRate?: RateCalibration; interviewRate?: RateCalibration; smallSample: boolean; everApplied: number; claimMinN: number } | null
   warnings: string[]

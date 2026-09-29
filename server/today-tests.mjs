@@ -5,7 +5,7 @@ let passed = 0, failed = 0;
 const ok = (c, m) => { if (c) { console.log(`PASS ${m}`); passed++; } else { console.error(`FAIL ${m}`); failed++; } };
 const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), m);
 
-const cadence = { entries: [
+const cadence = { metadata: { actionable: 131 }, entries: [
   { num: 1, company: 'A', role: 'r', score: '3.7/5', urgency: 'overdue', daysSinceApplication: 38, daysUntilNext: -31, contacts: [] },
   { num: 2, company: 'B', role: 'r', score: '4.2/5', urgency: 'overdue', daysSinceApplication: 20, daysUntilNext: -5, contacts: [{}] },
   { num: 3, company: 'C', role: 'r', score: '3.7/5', urgency: 'urgent', daysSinceApplication: 9, daysUntilNext: 3, contacts: [] },
@@ -22,6 +22,8 @@ eq(fu.items[2].urgency, 'urgent', 'urgent (future daysUntilNext) passes through 
 eq(fu.items[2].daysUntilNext, 3, 'urgent entry keeps its positive daysUntilNext');
 eq(fu.items[3].daysUntilNext, null, 'null daysUntilNext stays null, sorts last among equal scores');
 eq(followUpsDue(null).total, 0, 'missing cadence → empty');
+eq(fu.live, 131, 'live = applications the cadence tracks (metadata.actionable)');
+eq(followUpsDue(null).live, 0, 'missing cadence → live 0');
 
 const rows = [
   { '#': '10', Company: 'X', Role: 'r', Score: '4.5/5', Status: 'Evaluated' },

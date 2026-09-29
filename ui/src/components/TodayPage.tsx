@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { getToday, type Today, type FollowUp } from '@/lib/api'
 import { Button } from '@/components/ui/button'
+import { FollowUpMeter, PipelineDonut, ReplyRange } from '@/components/TodayCharts'
 
 const ROUTE_LABEL: Record<string, string> = { open: 'Open to apply', 'likely-gated': 'Check apply button', unknown: 'Route unknown' }
 
@@ -45,7 +46,7 @@ function calibrationSentence(cal: NonNullable<Today['calibration']>): string {
   return `${rr.ownPct}% of applications got a reply. ${range}.`
 }
 
-function Funnel({ f, cal }: { f: NonNullable<Today['funnel']>; cal: Today['calibration'] }) {
+function Funnel({ f }: { f: NonNullable<Today['funnel']> }) {
   const steps = [['Applied', f.everApplied], ['Responded', f.everResponded], ['Interviewed', f.everInterview], ['Offers', f.everOffer]] as const
   return (
     <section aria-label="Funnel" className="mb-6 flex flex-wrap items-end gap-x-8 gap-y-4 rounded-xl border bg-card px-5 py-4">
@@ -55,12 +56,7 @@ function Funnel({ f, cal }: { f: NonNullable<Today['funnel']>; cal: Today['calib
           <div className="mt-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</div>
         </div>
       ))}
-      {cal?.responseRate && (
-        <p className="max-w-sm text-sm text-muted-foreground sm:ml-auto">
-          {calibrationSentence(cal)}
-        </p>
-      )}
-      <a href="#/stats" className="text-line text-sm hover:underline">Full stats →</a>
+      <a href="#/stats" className="text-line text-sm hover:underline sm:ml-auto">Full stats →</a>
     </section>
   )
 }
@@ -80,7 +76,12 @@ export function TodayPage({ onOpen, refreshKey }: { onOpen: (num: string) => voi
       {t.warnings.length > 0 && (
         <p className="mb-4 text-sm text-muted-foreground">Some figures are missing because {t.warnings.join(', ')} couldn't run. Check the server log.</p>
       )}
-      {t.funnel && <Funnel f={t.funnel} cal={t.calibration} />}
+      {t.funnel && <Funnel f={t.funnel} />}
+      <div className="mb-6 grid gap-4 md:grid-cols-3">
+        {t.pipeline && <PipelineDonut byStatus={t.pipeline} />}
+        <FollowUpMeter due={t.followUps.total} live={t.followUps.live} />
+        {t.calibration?.responseRate && <ReplyRange rate={t.calibration.responseRate} sentence={calibrationSentence(t.calibration)} />}
+      </div>
       <div className="grid gap-4 md:grid-cols-2">
         <Card title="Follow-ups due" count={t.followUps.total}
           footer={t.followUps.total > t.followUps.items.length && (

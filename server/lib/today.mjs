@@ -10,6 +10,7 @@ export function followUpsDue(cadence, limit = 5) {
   due.sort((a, b) => (scoreNum(b.score) ?? 0) - (scoreNum(a.score) ?? 0) || until(a) - until(b));
   return {
     total: due.length,
+    live: cadence?.metadata?.actionable ?? 0, // live applications the cadence tracks
     items: due.slice(0, limit).map(e => ({
       num: String(e.num), company: e.company, role: e.role, score: scoreNum(e.score),
       daysSinceApplication: e.daysSinceApplication, urgency: e.urgency, daysUntilNext: e.daysUntilNext ?? null,

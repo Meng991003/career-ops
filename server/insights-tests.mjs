@@ -35,6 +35,7 @@ try {
     ok(Array.isArray(tb.worthApplying?.items), 'today.worthApplying.items');
     ok(tb.digest === null || Array.isArray(tb.digest.items), 'today.digest is null or {items}');
     ok(Array.isArray(tb.quietInterviews), 'today.quietInterviews[]');
+    ok(tb.pipeline === null || typeof tb.pipeline.Evaluated === 'number', 'today.pipeline is byStatus counts or null');
     ok(typeof tb.funnel?.everApplied === 'number', 'today.funnel from stats.mjs');
     ok(typeof tb.calibration?.responseRate === 'object', 'today.calibration from funnel-velocity.mjs');
     ok(Array.isArray(tb.warnings), 'today.warnings[]');

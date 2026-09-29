@@ -47,6 +47,7 @@ export async function today(req, res) {
     digest: topDigestJobs(digest),
     quietInterviews: latency?.flags ?? [],
     funnel: stats?.funnel ?? null,
+    pipeline: stats?.tracker?.byStatus ?? null,
     calibration: fv?.calibration ?? null,
     warnings,
   });
