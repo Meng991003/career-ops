@@ -6,12 +6,13 @@ const scoreNum = s => { const m = /^(\d+(?:\.\d+)?)\/5/.exec(String(s ?? '').tri
 
 export function followUpsDue(cadence, limit = 5) {
   const due = (cadence?.entries ?? []).filter(e => e.urgency === 'overdue' || e.urgency === 'urgent');
-  due.sort((a, b) => (scoreNum(b.score) ?? 0) - (scoreNum(a.score) ?? 0) || a.daysUntilNext - b.daysUntilNext);
+  const until = e => e.daysUntilNext ?? Infinity;
+  due.sort((a, b) => (scoreNum(b.score) ?? 0) - (scoreNum(a.score) ?? 0) || until(a) - until(b));
   return {
     total: due.length,
     items: due.slice(0, limit).map(e => ({
       num: String(e.num), company: e.company, role: e.role, score: scoreNum(e.score),
-      daysSinceApplication: e.daysSinceApplication, daysOverdue: Math.max(0, -e.daysUntilNext),
+      daysSinceApplication: e.daysSinceApplication, urgency: e.urgency, daysUntilNext: e.daysUntilNext ?? null,
       hasContact: (e.contacts ?? []).length > 0,
     })),
   };

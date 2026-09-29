@@ -8,14 +8,19 @@ const eq = (a, b, m) => ok(JSON.stringify(a) === JSON.stringify(b), m);
 const cadence = { entries: [
   { num: 1, company: 'A', role: 'r', score: '3.7/5', urgency: 'overdue', daysSinceApplication: 38, daysUntilNext: -31, contacts: [] },
   { num: 2, company: 'B', role: 'r', score: '4.2/5', urgency: 'overdue', daysSinceApplication: 20, daysUntilNext: -5, contacts: [{}] },
-  { num: 3, company: 'C', role: 'r', score: '3.7/5', urgency: 'urgent', daysSinceApplication: 9, daysUntilNext: -40, contacts: [] },
+  { num: 3, company: 'C', role: 'r', score: '3.7/5', urgency: 'urgent', daysSinceApplication: 9, daysUntilNext: 3, contacts: [] },
   { num: 4, company: 'D', role: 'r', score: '4.9/5', urgency: 'waiting', daysSinceApplication: 2, daysUntilNext: 5, contacts: [] },
+  { num: 5, company: 'E', role: 'r', score: '3.7/5', urgency: 'overdue', daysSinceApplication: 15, daysUntilNext: null, contacts: [] },
 ] };
-const fu = followUpsDue(cadence, 2);
-eq(fu.total, 3, 'followUpsDue counts overdue + urgent, not waiting');
-eq(fu.items.map(i => i.num), ['2', '3'], 'highest score first, then most overdue');
+const fu = followUpsDue(cadence, 5);
+eq(fu.total, 4, 'followUpsDue counts overdue + urgent, not waiting');
+eq(fu.items.map(i => i.num), ['2', '1', '3', '5'], 'highest score first, then smallest daysUntilNext (null sorts last)');
 eq(fu.items[0].hasContact, true, 'hasContact reflects the contacts array');
-eq(fu.items[1].daysOverdue, 40, 'daysOverdue is the positive days past due');
+eq(fu.items[1].urgency, 'overdue', 'urgency passes through unchanged');
+eq(fu.items[1].daysUntilNext, -31, 'daysUntilNext passes through, no daysOverdue math');
+eq(fu.items[2].urgency, 'urgent', 'urgent (future daysUntilNext) passes through as-is');
+eq(fu.items[2].daysUntilNext, 3, 'urgent entry keeps its positive daysUntilNext');
+eq(fu.items[3].daysUntilNext, null, 'null daysUntilNext stays null, sorts last among equal scores');
 eq(followUpsDue(null).total, 0, 'missing cadence → empty');
 
 const rows = [

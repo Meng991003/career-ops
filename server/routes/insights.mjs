@@ -24,12 +24,20 @@ async function trackerRows() {
   return existsSync(abs) ? parseTable(await readFile(abs, 'utf-8')).rows : [];
 }
 
+// A tracker script exits non-zero on a missing/empty tracker (e.g.
+// followup-cadence.mjs on zero rows). One script failing shouldn't 500 the
+// whole screen — degrade to null and note it in `warnings` instead.
+function soft(script, warnings) {
+  return runScriptJson(script).catch(() => { warnings.push(script); return null; });
+}
+
 export async function today(req, res) {
+  const warnings = [];
   const [cadence, latency, stats, fv, rows, digest] = await Promise.all([
-    runScriptJson('followup-cadence.mjs'),
-    runScriptJson('rejection-latency.mjs'),
-    runScriptJson('stats.mjs'),
-    runScriptJson('funnel-velocity.mjs'),
+    soft('followup-cadence.mjs', warnings),
+    soft('rejection-latency.mjs', warnings),
+    soft('stats.mjs', warnings),
+    soft('funnel-velocity.mjs', warnings),
     trackerRows(),
     latestDigest(),
   ]);
@@ -37,13 +45,15 @@ export async function today(req, res) {
     followUps: followUpsDue(cadence),
     worthApplying: worthApplying(rows),
     digest: topDigestJobs(digest),
-    quietInterviews: latency.flags ?? [],
-    funnel: stats.funnel,
-    calibration: fv.calibration,
+    quietInterviews: latency?.flags ?? [],
+    funnel: stats?.funnel ?? null,
+    calibration: fv?.calibration ?? null,
+    warnings,
   });
 }
 
 export async function stats(req, res) {
-  const [s, fv] = await Promise.all([runScriptJson('stats.mjs'), runScriptJson('funnel-velocity.mjs')]);
-  sendJson(res, 200, { stats: s, velocity: fv });
+  const warnings = [];
+  const [s, fv] = await Promise.all([soft('stats.mjs', warnings), soft('funnel-velocity.mjs', warnings)]);
+  sendJson(res, 200, { stats: s ?? null, velocity: fv ?? null, warnings });
 }
