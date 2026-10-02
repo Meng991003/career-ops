@@ -28,7 +28,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 import { makeHttpCtx } from './providers/_http.mjs';
 import jobstreet from './providers/jobstreet.mjs';

@@ -1,7 +1,7 @@
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join } from 'path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import { parseDocument } from 'yaml';
 import { runScriptJson } from '../lib/run.mjs';
 import { resolveUserPath, REPO_ROOT } from '../lib/paths.mjs';

@@ -3,7 +3,7 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { spawn } from 'child_process';
 import { existsSync, unlinkSync, readFileSync, writeFileSync } from 'fs';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..');

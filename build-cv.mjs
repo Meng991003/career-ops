@@ -17,7 +17,7 @@
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 const CV = 'cv.md';
 const TEMPLATE = 'templates/resume-template.html';

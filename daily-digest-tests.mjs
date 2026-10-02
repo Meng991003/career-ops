@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync, mkdtempSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 import {
   scoreJob, rankJobs, renderDigest, parseAppliedUrls, parseAppliedRows,
   pickAppliedToday, parsePendingUrls, digestDate, collectJobs, skillTokens,
