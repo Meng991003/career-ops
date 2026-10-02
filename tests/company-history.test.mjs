@@ -317,6 +317,69 @@ console.log('\n--- 6. unknown-company churn label depends on scanHistory load st
 }
 
 // ============================================================================
+// 6b. Via fallback for `?` agency rows + evaluated-only rows stay visible
+// ============================================================================
+console.log('\n--- 6b. Via fallback and evaluated-only rows ---');
+
+{
+  const result = buildCompanyCards(
+    {
+      trackerRows: [
+        { ...row(500, '?', 'Applied', '2026-01-01'), via: 'Quess' },
+        { ...row(501, '?', 'Evaluated', '2026-01-02'), via: 'QUESS' },
+        row(502, 'Luxoft', 'Evaluated', '2026-06-01'),
+        row(503, 'Luxoft', 'SKIP', '2026-06-02'),
+      ],
+      followupRows: [], repostClusters: [],
+      sourcesLoaded: { tracker: true, followups: false, scanHistory: false, statusLog: false },
+    },
+    { now: NOW, silenceWindowDays: 28 },
+  );
+  const quess = getCompanyCard(result, 'Quess');
+  eq('`?` rows group under their Via agency', quess.trackerRows.map(r => r.num), [500, 501]);
+  eq('the Via-grouped Applied row still yields a silent fact', quess.responsiveness.label, 'silent-on-you');
+  eq('`?` rows with a Via are not counted unjoinable', result.dataQuality.unjoinable, 0);
+
+  const luxoft = getCompanyCard(result, 'Luxoft');
+  eq('evaluated-only company is still no-history (no application yet)', luxoft.responsiveness.label, 'no-history');
+  eq('evaluated-only company lists its tracker rows', luxoft.trackerRows, [{ num: 502, status: 'Evaluated' }, { num: 503, status: 'SKIP' }]);
+  ok('summary lists rows that produced no fact', /#502 Evaluated, #503 SKIP/.test(renderSummary(result)));
+  eq('unknown company has no tracker rows', getCompanyCard(result, 'NeverSeenCo').trackerRows, []);
+}
+
+// Positional company argument filters --summary (it used to be dropped silently).
+{
+  const dir = mkdtempSync(join(tmpdir(), 'company-history-positional-'));
+  const trackerPath = join(dir, 'applications.md');
+  writeFileSync(trackerPath, [
+    '| # | Date | Company | Via | Role | Score | Status | PDF | Report | Notes | URL |',
+    '|---|------|---------|-----|------|-------|--------|-----|--------|-------|-----|',
+    '| 1 | 2026-06-01 | Luxoft | — | Dev | 2.0/5 | Evaluated | ❌ | [001](reports/001.md) | | |',
+    '| 2 | 2026-06-01 | Luxoft Singapore | — | Dev | 2.0/5 | Evaluated | ❌ | [002](reports/002.md) | | |',
+    '| 3 | 2026-06-01 | Acme | — | Dev | 2.0/5 | Evaluated | ❌ | [003](reports/003.md) | | |',
+    '',
+  ].join('\n'));
+  const env = { ...process.env, CAREER_OPS_TRACKER: trackerPath };
+  try {
+    const out = execFileSync('node', [scriptPath, 'Luxoft', '--summary'], { encoding: 'utf-8', timeout: 10000, env });
+    ok('positional company filters --summary to that company', /Luxoft \[no-history\]/.test(out) && !/Acme/.test(out));
+    ok('positional match includes suffixed variants ("Luxoft Singapore")', /Luxoft Singapore \[/.test(out));
+    const card = JSON.parse(execFileSync('node', [scriptPath, 'Luxoft'], { encoding: 'utf-8', timeout: 10000, env }));
+    eq('positional company without --summary prints that card', card.company, 'Luxoft');
+  } catch (e) {
+    ok('positional company CLI runs', false);
+    console.log(`    exit code: ${e.status}, stderr: ${e.stderr?.slice(0, 200)}`);
+  }
+  try {
+    execFileSync('node', [scriptPath, 'Luxoft', 'Acme'], { encoding: 'utf-8', timeout: 10000, env, stdio: 'pipe' });
+    ok('two positional companies exit 1', false);
+  } catch (e) {
+    ok('two positional companies exit 1', e.status === 1);
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+// ============================================================================
 // 7. CLI smoke tests
 // ============================================================================
 console.log('\n--- 7. CLI smoke tests ---');

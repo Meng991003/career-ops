@@ -108,6 +108,7 @@ const USAGE = `Usage:
   node company-history.mjs                       # full JSON evidence cards to stdout
   node company-history.mjs --summary              # human-readable cards
   node company-history.mjs --company "Acme"       # single-card lookup
+  node company-history.mjs "Acme" [--summary]     # same lookup; with --summary, cards whose name starts with "Acme"
   node company-history.mjs --silence-window 21    # override the default silence window (days)
   node company-history.mjs --include-stale        # include facts older than 365d in label computation
   node company-history.mjs --self-test            # run the in-memory test suite
@@ -142,6 +143,15 @@ function parseArgs(argv) {
     a.startsWith('-') && !consumedValueIndices.has(idx) && !KNOWN_FLAGS.includes(a.split('=')[0]));
   if (unknownFlags.length) {
     console.error(`Error: unrecognized flag(s): ${unknownFlags.join(', ')}. Valid flags: ${KNOWN_FLAGS.join(', ')}`);
+    console.error(USAGE);
+    process.exit(1);
+  }
+
+  // A bare company name ("Acme" --summary) is the lookup target when
+  // --company is absent; it used to be silently ignored.
+  const positionals = args.filter((a, idx) => !a.startsWith('-') && !consumedValueIndices.has(idx));
+  if (positionals.length > 1) {
+    console.error(`Error: expected at most one company name, got ${positionals.length}: ${positionals.join(', ')} (quote names with spaces)`);
     console.error(USAGE);
     process.exit(1);
   }
@@ -224,6 +234,7 @@ function parseArgs(argv) {
     summaryMode,
     selfTestMode: args.includes('--self-test'),
     company,
+    query: company ? undefined : positionals[0],
     silenceWindowArg,
     includeStale: args.includes('--include-stale'),
     scanHistoryOverride: valueOf('--scan-history'),
@@ -526,9 +537,12 @@ export function buildCompanyCards(sources, opts = {}) {
   // Group tracker rows by normalized company key.
   const trackerByKey = new Map();
   for (const row of trackerRows) {
-    const key = normalizeCompany(String(row?.company || ''));
+    // An agency row records `?` as Company and the agency in Via (#1596):
+    // group it under the agency rather than dropping it as unjoinable.
+    const companyKey = normalizeCompany(String(row?.company || ''));
+    const key = companyKey || normalizeCompany(String(row?.via || ''));
     if (!key) { unjoinable += 1; continue; }
-    if (!trackerByKey.has(key)) trackerByKey.set(key, { company: row.company, rows: [] });
+    if (!trackerByKey.has(key)) trackerByKey.set(key, { company: companyKey ? row.company : row.via, rows: [] });
     trackerByKey.get(key).rows.push(row);
   }
 
@@ -604,7 +618,12 @@ export function buildCompanyCards(sources, opts = {}) {
       }
     }
 
-    cards.push({ company: companyName, key, responsiveness, postingChurn, explanations });
+    // Every tracker row, including Evaluated/SKIP ones that produce no
+    // responsiveness fact — otherwise a company you only evaluated reads as
+    // one you have never seen.
+    const trackerRowRefs = (trackerGroup?.rows || []).map(r => ({ num: r.num, status: r.status }));
+
+    cards.push({ company: companyName, key, responsiveness, postingChurn, explanations, trackerRows: trackerRowRefs });
   }
 
   cards.sort((a, b) => compareCompany(a.company, b.company));
@@ -666,6 +685,31 @@ export function getCompanyCard(result, companyName, aggregators) {
     responsiveness: { label: 'no-history', facts: [] },
     postingChurn: { label: churnLabel, clusters: [] },
     explanations: isAggregator && scanHistoryLoaded ? [AGGREGATOR_LINE] : [],
+    trackerRows: [],
+  };
+}
+
+// --- Name-prefix filter (positional `"Acme" --summary`) ---
+//
+// Word-prefix rather than exact key so "Luxoft" also finds "Luxoft Singapore"
+// and "Quess" finds "Quess Selection & Services"; whole words, so "Lux" does
+// not match "Luxoft". Exact normalized key still matches ("JobStreet" vs
+// "Job Street").
+export function companyMatchesQuery(companyName, query) {
+  const words = s => String(s || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  const q = words(query);
+  const c = words(companyName);
+  if (q.length > 0 && q.every((w, i) => c[i] === w)) return true;
+  const key = normalizeCompany(String(query || ''));
+  return !!key && key === normalizeCompany(String(companyName || ''));
+}
+
+export function filterResultByQuery(result, query) {
+  const matches = name => companyMatchesQuery(name, query);
+  return {
+    ...result,
+    hygiene: { agedApplied: (result.hygiene?.agedApplied || []).filter(a => matches(a.company)) },
+    companies: result.companies.filter(c => matches(c.company)),
   };
 }
 
@@ -1019,6 +1063,11 @@ export function renderSummary(result) {
         const note = f.note ? ` (${f.note})` : '';
         lines.push(`      #${f.num} ${f.outcome}${f.date ? ` (evaluated ${f.date})` : ''}${note}`);
       }
+    }
+    const factNums = new Set(card.responsiveness.facts.map(f => f.num));
+    const otherRows = (card.trackerRows || []).filter(r => !factNums.has(r.num));
+    if (otherRows.length > 0) {
+      lines.push(`      tracker: ${otherRows.map(r => `#${r.num} ${r.status}`).join(', ')}`);
     }
     for (const c of card.postingChurn.clusters) {
       lines.push(`      repost: "${c.role}" seen ${c.repostCount}x over ${c.daysSpan}d, last ${c.lastSeen}`);
@@ -1741,7 +1790,7 @@ async function runSelfTest() {
 
 // --- Run (CLI only; guarded so the module is safely importable for tests) ---
 if (isMainModule(import.meta.url)) {
-  const { summaryMode, selfTestMode, company, silenceWindowArg, includeStale, scanHistoryOverride, followupsOverride, emitSignal } =
+  const { summaryMode, selfTestMode, company, query, silenceWindowArg, includeStale, scanHistoryOverride, followupsOverride, emitSignal } =
     parseArgs(process.argv);
 
   if (selfTestMode) {
@@ -1761,7 +1810,7 @@ if (isMainModule(import.meta.url)) {
         ? parseInt(silenceWindowArg, 10)
         : resolveDefaultSilenceWindow(CAREER_OPS);
 
-      const result = buildCompanyCards(
+      const fullResult = buildCompanyCards(
         {
           trackerRows: tracker.rows,
           followupRows: followups.rows,
@@ -1778,9 +1827,11 @@ if (isMainModule(import.meta.url)) {
         },
         { silenceWindowDays, includeStale },
       );
+      const result = query && summaryMode ? filterResultByQuery(fullResult, query) : fullResult;
 
-      if (company) {
-        console.log(JSON.stringify(getCompanyCard(result, company), null, 2));
+      const lookup = company || (!summaryMode && query);
+      if (lookup) {
+        console.log(JSON.stringify(getCompanyCard(result, lookup), null, 2));
       } else if (summaryMode) {
         console.log(renderSummary(result));
       } else {
