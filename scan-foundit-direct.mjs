@@ -15,7 +15,7 @@
 // a salary-floor check. It is a sort order, not a fit score; the A-G evaluation
 // is what judges fit.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import yaml from 'js-yaml';
+import * as yaml from 'js-yaml';
 
 const arg = (k, d) => {
   const i = process.argv.indexOf(k);
